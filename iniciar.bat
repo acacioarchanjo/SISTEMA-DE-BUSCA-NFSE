@@ -25,22 +25,30 @@ if errorlevel 1 (
   exit /b 1
 )
 
-REM 2) Versao minima 20
+REM 2) Versao minima 22
 for /f "tokens=1 delims=." %%v in ('node -p "process.versions.node"') do set NODE_MAJOR=%%v
-if %NODE_MAJOR% LSS 20 (
-  echo [ERRO] Node.js %NODE_MAJOR% e antigo demais. Instale o Node 22 LTS em https://nodejs.org
+if %NODE_MAJOR% LSS 22 (
+  echo [ERRO] Node.js %NODE_MAJOR% e antigo demais. Instale o Node LTS em https://nodejs.org
   echo.
   pause
   exit /b 1
 )
 
-REM 3) Dependencias (so na primeira vez)
-if not exist "node_modules\" (
-  echo Instalando dependencias - so na primeira vez, pode demorar alguns minutos...
-  call npm.cmd install
+REM 3) Dependencias: instala na primeira vez ou se a instalacao estiver incompleta
+node -e "require('dotenv');require('better-sqlite3')" >nul 2>nul
+if errorlevel 1 (
+  echo Instalando dependencias - pode demorar alguns minutos...
+  call npm.cmd install --no-audit --no-fund
   if errorlevel 1 (
     echo.
     echo [ERRO] Falha no npm install. Veja a secao "Problemas comuns" do README.
+    pause
+    exit /b 1
+  )
+  node -e "require('dotenv');require('better-sqlite3')"
+  if errorlevel 1 (
+    echo.
+    echo [ERRO] As dependencias nao carregaram mesmo apos o npm install. Mande a mensagem acima para o suporte.
     pause
     exit /b 1
   )
