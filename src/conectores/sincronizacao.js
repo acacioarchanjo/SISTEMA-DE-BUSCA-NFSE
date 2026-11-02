@@ -120,7 +120,7 @@ export async function sincronizarMunicipal(repo, vinculoId, opcoes = {}) {
     }
     estado.requisicoes = conector.requisicoes ?? 0;
     estado.falhasTransitorias = conector.falhasTransitorias ?? [];
-    if (conector.assinaturaDetectada) lembrarAssinatura(repo, municipio);
+    if (conector.assinaturaDetectada) lembrarAssinatura(repo, municipio, conector.algoritmo);
 
     let validacao = null;
     try {
@@ -163,11 +163,11 @@ export async function sincronizarMunicipal(repo, vinculoId, opcoes = {}) {
 }
 
 /** A prefeitura exigiu consulta assinada: grava no cadastro do município para as próximas buscas. */
-function lembrarAssinatura(repo, municipio) {
+function lembrarAssinatura(repo, municipio, algoritmo = 'sha1') {
   const atual = repo.obterMunicipio(municipio.ibge);
-  if (atual?.opcoes?.assinarConsulta) return;
-  repo.salvarMunicipio({ ...atual, opcoes: { ...atual.opcoes, assinarConsulta: true } });
-  registrarAuditoria(repo.db, { tipo: 'municipio.assinatura_detectada', payload: { ibge: municipio.ibge, nome: municipio.nome } });
+  if (atual?.opcoes?.assinarConsulta && (atual.opcoes.algoritmoAssinatura ?? 'sha1') === algoritmo) return;
+  repo.salvarMunicipio({ ...atual, opcoes: { ...atual.opcoes, assinarConsulta: true, algoritmoAssinatura: algoritmo } });
+  registrarAuditoria(repo.db, { tipo: 'municipio.assinatura_detectada', payload: { ibge: municipio.ibge, nome: municipio.nome, algoritmo } });
 }
 
 /** Testa a configuração de um vínculo (consulta mínima, sem gravar nada). */
@@ -178,7 +178,7 @@ export async function testarVinculo(repo, vinculoId, { criarConector = criarCone
   const conector = criarConector({ municipio, credenciais: abrirCredenciais(repo, vinculo.empresa_id), inscricaoMunicipal: vinculo.inscricao_municipal });
   try {
     const r = await conector.testar();
-    if (r.assinaturaDetectada) lembrarAssinatura(repo, municipio);
+    if (r.assinaturaDetectada) lembrarAssinatura(repo, municipio, r.algoritmoAssinatura);
     return { ...r, capacidades: conector.capacidades(), conector: conector.id };
   } finally {
     conector.fechar();

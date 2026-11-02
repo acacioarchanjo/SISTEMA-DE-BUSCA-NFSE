@@ -9,13 +9,21 @@ export const MUNICIPIOS_CONHECIDOS = {
     perfil: 'abrasf-2.03',
     url: 'https://novanfse.campinas.sp.gov.br/notafiscal-abrasfv203-ws/NotaFiscalSoap',
     urlHomologacao: 'https://homol-rps.ima.sp.gov.br/notafiscal-abrasfv203-ws/NotaFiscalSoap',
-    // SOAP 1.1, SOAPAction vazio, <nfse:ConsultarNfseServicoPrestado> com o XML direto (sem nfseCabecMsg/nfseDadosMsg)
-    opcoes: { soapVersao: '1.1', estilo: 'direto', elementoOperacao: '{op}', soapAction: '', nsServico: 'http://nfse.abrasf.org.br' },
+    // SOAP 1.1, SOAPAction vazio, <nfse:ConsultarNfseServicoPrestado> com o XML direto (sem nfseCabecMsg/nfseDadosMsg);
+    // XML de dados SEM namespace e ASSINADO (no XSD de Campinas, Signature é obrigatória nas consultas por período)
+    opcoes: {
+      soapVersao: '1.1', estilo: 'direto', elementoOperacao: '{op}', soapAction: '', nsServico: 'http://nfse.abrasf.org.br',
+      namespaceDados: '', assinarConsulta: true,
+    },
     observacoes:
-      'NFS-e Campinas (sistema IMA), padrão ABRASF 2.03. Exige certificado ICP-Brasil. Se a prefeitura pedir consulta assinada, ' +
-      'o sistema detecta e passa a assinar sozinho. Campinas também publicou uma API no padrão nacional (nfseapi.campinas.sp.gov.br): ' +
+      'NFS-e Campinas (sistema IMA), padrão ABRASF 2.03. Exige certificado ICP-Brasil e consulta assinada; elementos sem namespace ' +
+      '(XSD do padrão "DSF" de Campinas). Campinas também publicou uma API no padrão nacional (nfseapi.campinas.sp.gov.br): ' +
       'se as notas já chegam pelo ADN, a conferência sinaliza duplicidade (DUP-001).',
-    fontes: ['Unimake DFe — Servicos/Config/NFSe/CampinasSP.xml', 'OpenAC.Net.NFSe — Providers/ISSCampinas'],
+    fontes: [
+      'Unimake DFe — Servicos/Config/NFSe/CampinasSP.xml (envelope), Xml/Schemas/NFSe/DSF/nfse.xsd (Signature obrigatória, sem namespace)',
+      'Unimake DFe — Unimake.DFe.Test/NFSe/Resources/DSF/2.03/ConsultarNfseServicoPrestadoEnvio-ped-sitnfse.xml',
+      'OpenAC.Net.NFSe — Providers/ISSCampinas',
+    ],
   },
 };
 
@@ -30,5 +38,5 @@ export function difereDaRecomendada(municipio) {
   if (!r) return false;
   if (municipio.perfil !== r.perfil || municipio.url.replace(/\?wsdl$/i, '') !== r.url) return true;
   const atuais = municipio.opcoes ?? {};
-  return Object.entries(r.opcoes).some(([k, v]) => atuais[k] !== v);
+  return Object.entries(r.opcoes).some(([k, v]) => k !== 'assinarConsulta' && atuais[k] !== v) || (r.opcoes.assinarConsulta && !atuais.assinarConsulta);
 }
