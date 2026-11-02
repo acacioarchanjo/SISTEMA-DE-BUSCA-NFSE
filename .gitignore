@@ -29,3 +29,6 @@ backups/
 # Cópias de segurança feitas pela restauração (dados de clientes e chave mestra)
 data-antes-restauracao-*/
 .env.antes-restauracao-*
+
+# Versão instalada (gravada pelo atualizar.bat)
+.versao
