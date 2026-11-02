@@ -138,6 +138,8 @@ export function parseNfse(xml) {
     prestador_doc: docDe(prest) ?? docDe(emit),
     prestador_nome: campo(emit, 'xNome') ?? campo(prest, 'xNome') ?? null,
     prestador_im: campo(emit, 'IM') ?? campo(prest, 'IM') ?? null,
+    // opSimpNac: 1 = não optante | 2 = MEI | 3 = ME/EPP (Simples Nacional)
+    prestador_regime: campo(prest, 'regTrib.opSimpNac') ?? null,
     tomador_doc: toma ? docDe(toma) : null,
     tomador_nome: toma ? (campo(toma, 'xNome') ?? null) : null,
     intermediario_doc: interm ? docDe(interm) : null,
@@ -153,6 +155,7 @@ export function parseNfse(xml) {
     aliquota: arred(aliquota),
     valor_iss: arred(valorIss),
     iss_retido: issRetido,
+    tp_ret_issqn: campo(tribMun, 'tpRetISSQN') ?? null,
     valor_pis: arred(valorPis),
     valor_cofins: arred(valorCofins),
     pis_cofins_retido: pisCofinsRetido,

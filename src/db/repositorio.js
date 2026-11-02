@@ -1,4 +1,5 @@
 // Acesso a dados: empresas, cursor NSU, documentos, eventos e execuções.
+import { registrarAuditoria } from '../auditoria.js';
 
 const CAMPOS_DOC = [
   'empresa_id', 'chave', 'nsu', 'origem', 'papel', 'situacao', 'numero', 'data_emissao',
@@ -7,6 +8,7 @@ const CAMPOS_DOC = [
   'codigo_nbs', 'descricao', 'valor_servico', 'valor_deducoes', 'base_calculo', 'aliquota',
   'valor_iss', 'iss_retido', 'valor_pis', 'valor_cofins', 'pis_cofins_retido', 'valor_csll',
   'valor_irrf', 'valor_inss', 'valor_total_retencoes', 'valor_liquido', 'xml_path',
+  'prestador_regime', 'tp_ret_issqn', 'codigo_municipio_incidencia',
 ];
 
 // Colunas que o painel/API podem ver de uma empresa (nunca o certificado).
@@ -76,8 +78,17 @@ export class Repositorio {
       this.db.prepare("UPDATE empresas SET ativo=?, atualizado_em=datetime('now') WHERE id=?").run(ativo ? 1 : 0, id);
   }
 
-  excluirEmpresa(id) {
-    return this.db.prepare('DELETE FROM empresas WHERE id = ?').run(id).changes > 0;
+  excluirEmpresa(id, { motivo = null } = {}) {
+    const e = this.obterEmpresa(id);
+    const ok = this.db.prepare('DELETE FROM empresas WHERE id = ?').run(id).changes > 0;
+    if (ok && e) {
+      registrarAuditoria(this.db, {
+        tipo: 'empresa.excluida',
+        empresaCnpj: e.cnpj,
+        payload: { empresa_id: id, cnpj: e.cnpj, razao_social: e.razao_social, notas_apagadas: e.total_documentos, motivo },
+      });
+    }
+    return ok;
   }
 
   definirTrava(id, ateIso) {
@@ -140,7 +151,11 @@ export class Repositorio {
     const offset = Number(f.offset) || 0;
     const itens = this.db
       .prepare(
-        `SELECT d.*, e.razao_social AS empresa_nome, e.cnpj AS empresa_cnpj FROM documentos d
+        `SELECT d.*, e.razao_social AS empresa_nome, e.cnpj AS empresa_cnpj,
+           (SELECT COUNT(*) FROM divergencias v WHERE v.documento_id = d.id AND v.status = 'aberta' AND v.severidade = 'BLOQUEANTE') AS div_bloqueantes,
+           (SELECT COUNT(*) FROM divergencias v WHERE v.documento_id = d.id AND v.status = 'aberta' AND v.severidade = 'ALERTA') AS div_alertas,
+           (SELECT COUNT(*) FROM divergencias v WHERE v.documento_id = d.id AND v.status = 'aberta' AND v.severidade = 'INFO') AS div_info
+         FROM documentos d
          JOIN empresas e ON e.id = d.empresa_id ${where}
          ORDER BY d.competencia DESC, d.data_emissao DESC, d.id DESC LIMIT ${limite} OFFSET ${offset}`,
       )
@@ -163,6 +178,8 @@ export class Repositorio {
     if (f.situacao) { cond.push('d.situacao = @situacao'); params.situacao = f.situacao; }
     if (f.de) { cond.push('d.competencia >= @de'); params.de = f.de; }
     if (f.ate) { cond.push('d.competencia <= @ate'); params.ate = f.ate; }
+    if (f.divergencia === 'bloqueante') cond.push("EXISTS (SELECT 1 FROM divergencias v WHERE v.documento_id = d.id AND v.status = 'aberta' AND v.severidade = 'BLOQUEANTE')");
+    else if (f.divergencia === 'qualquer') cond.push("EXISTS (SELECT 1 FROM divergencias v WHERE v.documento_id = d.id AND v.status = 'aberta')");
     if (f.busca) {
       cond.push(`(d.chave LIKE @busca OR d.numero LIKE @busca OR d.prestador_nome LIKE @busca OR d.tomador_nome LIKE @busca
         OR d.prestador_doc LIKE @busca OR d.tomador_doc LIKE @busca OR d.descricao LIKE @busca)`);
@@ -188,18 +205,27 @@ export class Repositorio {
   }
 
   // ---------- execuções ----------
-  iniciarExecucao(empresaId, tipo) {
+  iniciarExecucao(empresaId, tipo, { loteId = null } = {}) {
     return Number(
-      this.db.prepare("INSERT INTO execucoes (empresa_id, tipo, status) VALUES (?, ?, 'executando')").run(empresaId, tipo).lastInsertRowid,
+      this.db
+        .prepare("INSERT INTO execucoes (empresa_id, tipo, status, codigo, lote_id) VALUES (?, ?, 'executando', 'EM_EXECUCAO', ?)")
+        .run(empresaId, tipo, loteId).lastInsertRowid,
     );
   }
 
   atualizarExecucao(id, dados) {
-    const campos = ['status', 'lotes', 'novos', 'eventos', 'ultimo_nsu', 'mensagem'].filter((c) => dados[c] !== undefined);
+    const d = { ...dados };
+    if (d.detalhes !== undefined && typeof d.detalhes !== 'string') d.detalhes = JSON.stringify(d.detalhes);
+    const campos = ['status', 'codigo', 'subcodigo', 'detalhes', 'lotes', 'novos', 'eventos', 'ultimo_nsu', 'mensagem'].filter((c) => d[c] !== undefined);
     const sets = campos.map((c) => `${c}=@${c}`);
-    if (dados.finalizar) sets.push("fim=datetime('now')");
+    if (d.finalizar) sets.push("fim=datetime('now')");
     if (!sets.length) return;
-    this.db.prepare(`UPDATE execucoes SET ${sets.join(', ')} WHERE id=@id`).run({ ...dados, id });
+    this.db.prepare(`UPDATE execucoes SET ${sets.join(', ')} WHERE id=@id`).run({ ...d, id });
+  }
+
+  obterExecucao(id) {
+    const x = this.db.prepare('SELECT x.*, e.razao_social AS empresa_nome, e.cnpj AS empresa_cnpj FROM execucoes x LEFT JOIN empresas e ON e.id = x.empresa_id WHERE x.id = ?').get(id);
+    return x ? { ...x, detalhes: x.detalhes ? JSON.parse(x.detalhes) : null } : undefined;
   }
 
   execucaoEmAndamento(empresaId) {
@@ -221,8 +247,64 @@ export class Repositorio {
         `SELECT (SELECT COUNT(*) FROM empresas) AS empresas, (SELECT COUNT(*) FROM documentos) AS documentos,
          (SELECT COUNT(*) FROM documentos WHERE papel='emitida') AS emitidas,
          (SELECT COUNT(*) FROM documentos WHERE papel='recebida') AS recebidas,
-         (SELECT COUNT(*) FROM documentos WHERE situacao='cancelada') AS canceladas`,
+         (SELECT COUNT(*) FROM documentos WHERE situacao='cancelada') AS canceladas,
+         (SELECT COUNT(*) FROM divergencias WHERE status='aberta' AND severidade='BLOQUEANTE') AS divergencias_bloqueantes,
+         (SELECT COUNT(*) FROM divergencias WHERE status='aberta' AND severidade='ALERTA') AS divergencias_alertas,
+         (SELECT COUNT(*) FROM divergencias WHERE status='aberta' AND severidade='INFO') AS divergencias_info`,
       )
       .get();
+  }
+
+  // ---------- divergências ----------
+  #filtroDiv(f) {
+    const cond = [];
+    const p = {};
+    if (f.empresaId) { cond.push('v.empresa_id = @empresaId'); p.empresaId = Number(f.empresaId); }
+    if (f.status) { cond.push('v.status = @status'); p.status = f.status; }
+    if (f.severidade) { cond.push('v.severidade = @severidade'); p.severidade = f.severidade; }
+    if (f.codigo) { cond.push('v.codigo = @codigo'); p.codigo = f.codigo; }
+    if (f.documentoId) { cond.push('v.documento_id = @documentoId'); p.documentoId = Number(f.documentoId); }
+    if (f.de) { cond.push('v.competencia >= @de'); p.de = f.de; }
+    if (f.ate) { cond.push('v.competencia <= @ate'); p.ate = f.ate; }
+    return { where: cond.length ? 'WHERE ' + cond.join(' AND ') : '', p };
+  }
+
+  listarDivergencias(f = {}) {
+    const { where, p } = this.#filtroDiv(f);
+    const limite = Math.min(Number(f.limite) || 200, 100_000);
+    const offset = Number(f.offset) || 0;
+    const itens = this.db
+      .prepare(
+        `SELECT v.*, d.numero, d.chave, d.papel, d.prestador_nome, d.prestador_doc, d.tomador_nome, d.tomador_doc,
+           d.valor_servico, d.valor_iss, d.situacao, e.razao_social AS empresa_nome, e.cnpj AS empresa_cnpj
+         FROM divergencias v JOIN documentos d ON d.id = v.documento_id JOIN empresas e ON e.id = v.empresa_id
+         ${where}
+         ORDER BY CASE v.severidade WHEN 'BLOQUEANTE' THEN 0 WHEN 'ALERTA' THEN 1 ELSE 2 END, v.competencia DESC, v.id DESC
+         LIMIT ${limite} OFFSET ${offset}`,
+      )
+      .all(p)
+      .map((v) => ({ ...v, detalhes: v.detalhes ? JSON.parse(v.detalhes) : {} }));
+    const total = this.db.prepare(`SELECT COUNT(*) AS n FROM divergencias v ${where}`).get(p).n;
+    return { itens, total };
+  }
+
+  /** Contagem por severidade (abertas, salvo outro status). */
+  contarDivergencias({ empresaId, status = 'aberta' } = {}) {
+    const { where, p } = this.#filtroDiv({ empresaId, status });
+    const linhas = this.db.prepare(`SELECT v.severidade, COUNT(*) AS n FROM divergencias v ${where} GROUP BY v.severidade`).all(p);
+    const r = { BLOQUEANTE: 0, ALERTA: 0, INFO: 0 };
+    for (const l of linhas) r[l.severidade] = l.n;
+    return r;
+  }
+
+  obterDivergencia(id) {
+    const v = this.db.prepare('SELECT v.*, e.cnpj AS empresa_cnpj FROM divergencias v JOIN empresas e ON e.id = v.empresa_id WHERE v.id = ?').get(id);
+    return v ? { ...v, detalhes: v.detalhes ? JSON.parse(v.detalhes) : {} } : undefined;
+  }
+
+  definirStatusDivergencia(id, status, motivo) {
+    return this.db
+      .prepare("UPDATE divergencias SET status = ?, motivo = ?, atualizado_em = datetime('now') WHERE id = ?")
+      .run(status, motivo ?? null, id).changes > 0;
   }
 }

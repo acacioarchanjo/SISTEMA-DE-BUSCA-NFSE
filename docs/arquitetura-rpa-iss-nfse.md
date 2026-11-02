@@ -602,7 +602,7 @@ Observações:
 | Fase | Entrega | Reaproveita do Buscador |
 |---|---|---|
 | 0 (feito) | Captura ADN/NFS-e Nacional, cursor NSU, eventos, trava de consumo indevido, cofre de certificados, importação em lote, exportação, backup | — |
-| 1 | Catálogo de status (seção 11) e log de auditoria (seção 12) nas execuções atuais; regras `RET-*`, `ALQ-*`, `CMP-*`, `CAN-*` sobre as notas do ADN | `execucoes`, `parser.js`, painel |
+| 1 (feito) | Catálogo de status (seção 11) e log de auditoria (seção 12) nas execuções atuais; regras `RET-001/002/004/005`, `ALQ-001/002`, `CMP-001`, `CAN-001` sobre as notas do ADN — `src/execucao/catalogo.js`, `src/auditoria.js`, `src/fiscal/` | `execucoes`, `parser.js`, painel |
 | 2 | Contrato `ConectorMunicipal` + conector **ABRASF genérico** (consulta de prestado/tomado) + cadastro de municípios | `cliente.js` (mTLS), `credenciais.js` |
 | 3 | Fila de pendências HITL no painel (credencial, divergência, aprovação) | painel, `alertas` da página Início |
 | 4 | Conector **São Paulo** (consultas por API) e **conferência de retenções** (CPOM) | modelo canônico |

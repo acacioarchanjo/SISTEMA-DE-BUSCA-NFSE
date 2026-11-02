@@ -5,7 +5,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
 import { cadastrarEmpresa, analisarCertificado } from '../crypto/credenciais.js';
-import { sincronizarEmpresa, importarXml } from '../adn/distribuicao.js';
+import { sincronizarEmpresa, sincronizarTodas, importarXml } from '../adn/distribuicao.js';
+import { validarDocumentos } from '../fiscal/validacao.js';
+import { catalogoRegras } from '../fiscal/regras.js';
+import { CATALOGO, SUBCODIGOS } from '../execucao/catalogo.js';
+import { registrarAuditoria, verificarAuditoria, listarAuditoria, exportarAuditoria } from '../auditoria.js';
 import { conciliarEmpresa } from '../portal/conciliacao.js';
 import { lerXmlSalvo, excluirXmlsDaEmpresa } from '../nfse/armazenamento.js';
 import { gerarZip } from '../exportador/zip.js';
@@ -74,6 +78,7 @@ const filtrosDe = (q) => ({
   de: q.get('de') || undefined,
   ate: q.get('ate') || undefined,
   busca: q.get('busca') || undefined,
+  divergencia: q.get('divergencia') || undefined,
 });
 
 const hoje = () => new Date().toISOString().slice(0, 10);
@@ -83,6 +88,7 @@ const hoje = () => new Date().toISOString().slice(0, 10);
  */
 export function criarServidor(repo, opcoes = {}) {
   const sincronizar = opcoes.sincronizar ?? sincronizarEmpresa;
+  const sincronizarLote = opcoes.sincronizarTodas ?? sincronizarTodas;
   const conciliar = opcoes.conciliar ?? conciliarEmpresa;
   const dataDir = opcoes.dataDir ?? config.dataDir;
   const hostsPermitidos = new Set(['localhost', '127.0.0.1', '[::1]', config.servidor.host]);
@@ -162,12 +168,8 @@ export function criarServidor(repo, opcoes = {}) {
     ['POST', /^\/api\/buscar-todas$/, (req, res) => {
       const empresas = repo.listarEmpresas({ somenteAtivas: true });
       emSegundoPlano(async () => {
-        for (const e of empresas) {
-          try {
-            await sincronizar(repo, e.id);
-          } catch (err) {
-            console.error(`[busca] ${e.razao_social}: ${err.message}`);
-          }
+        for (const r of await sincronizarLote(repo, { disparo: { origem: 'painel' } })) {
+          if (!r.ok) console.error(`[busca] ${r.empresa}: ${r.codigo} — ${r.mensagem}`);
         }
       });
       json(res, 202, { ok: true, mensagem: `Busca iniciada para ${empresas.length} empresa(s).` });
@@ -210,18 +212,74 @@ export function criarServidor(repo, opcoes = {}) {
           erros.push(`${a.nome ?? 'arquivo'}: ${err.message}`);
         }
       }
-      json(res, 200, { novos, total: arquivos.length, erros });
+      const validacao = arquivos.length > erros.length ? validarDocumentos(repo, { empresaId: e.id, dataDir }) : null;
+      json(res, 200, { novos, total: arquivos.length, erros, divergencias: validacao?.abertas ?? null });
     }],
 
     ['GET', /^\/api\/execucoes$/, (req, res, _, q) =>
       json(res, 200, repo.listarExecucoes({ empresaId: q.get('empresa'), limite: q.get('limite') ?? 30 }))],
+
+    ['GET', /^\/api\/execucoes\/(\d+)$/, (req, res, [id]) => {
+      const x = repo.obterExecucao(Number(id));
+      if (!x) throw new ErroHttp(404, 'Execução não encontrada.');
+      json(res, 200, { ...x, catalogo: CATALOGO[x.codigo] ?? null, subcodigo_descricao: SUBCODIGOS[x.subcodigo] ?? null });
+    }],
+
+    // ---------- catálogo, conferência fiscal e auditoria ----------
+    ['GET', /^\/api\/catalogo$/, (req, res) => json(res, 200, { status: CATALOGO, subcodigos: SUBCODIGOS, regras: catalogoRegras() })],
+
+    ['GET', /^\/api\/divergencias$/, (req, res, _, q) => {
+      const f = {
+        empresaId: q.get('empresa') || undefined,
+        status: q.get('status') ?? 'aberta',
+        severidade: q.get('severidade') || undefined,
+        codigo: q.get('codigo') || undefined,
+        de: q.get('de') || undefined,
+        ate: q.get('ate') || undefined,
+      };
+      if (f.status === 'todas') delete f.status;
+      json(res, 200, { ...repo.listarDivergencias({ ...f, limite: q.get('limite') ?? 200, offset: q.get('offset') ?? 0 }), contagem: repo.contarDivergencias({ empresaId: f.empresaId }) });
+    }],
+
+    ['POST', /^\/api\/divergencias\/(\d+)\/(ignorar|reabrir)$/, async (req, res, [id, acao]) => {
+      const v = repo.obterDivergencia(Number(id));
+      if (!v) throw new ErroHttp(404, 'Divergência não encontrada.');
+      const b = await lerCorpo(req);
+      const motivo = String(b.motivo ?? '').trim();
+      if (acao === 'ignorar' && motivo.length < 5) throw new ErroHttp(400, 'Informe o motivo (pelo menos 5 caracteres) para ignorar a divergência.');
+      repo.definirStatusDivergencia(v.id, acao === 'ignorar' ? 'ignorada' : 'aberta', acao === 'ignorar' ? motivo : null);
+      registrarAuditoria(repo.db, {
+        tipo: acao === 'ignorar' ? 'divergencia.ignorada' : 'divergencia.reaberta',
+        empresaCnpj: v.empresa_cnpj,
+        payload: { divergencia_id: v.id, documento_id: v.documento_id, codigo: v.codigo, severidade: v.severidade, competencia: v.competencia, motivo: motivo || null },
+      });
+      json(res, 200, repo.obterDivergencia(v.id));
+    }],
+
+    ['POST', /^\/api\/validar$/, async (req, res) => {
+      const b = await lerCorpo(req);
+      if (b.empresa) empresaOu404(b.empresa);
+      json(res, 200, validarDocumentos(repo, { empresaId: b.empresa ? Number(b.empresa) : undefined, dataDir, auditar: true }));
+    }],
+
+    ['GET', /^\/api\/auditoria$/, (req, res, _, q) =>
+      json(res, 200, listarAuditoria(repo.db, { limite: q.get('limite') ?? 50, tipo: q.get('tipo') || undefined }))],
+
+    ['GET', /^\/api\/auditoria\/verificar$/, (req, res) => json(res, 200, verificarAuditoria(repo.db))],
+
+    ['GET', /^\/api\/auditoria\/exportar$/, (req, res) =>
+      arquivo(res, Buffer.from(JSON.stringify(exportarAuditoria(repo.db), null, 2), 'utf8'), 'application/json; charset=utf-8', `auditoria-${hoje()}.json`)],
 
     ['GET', /^\/api\/documentos$/, (req, res, _, q) =>
       json(res, 200, repo.listarDocumentos({ ...filtrosDe(q), limite: q.get('limite') ?? 100, offset: q.get('offset') ?? 0 }))],
 
     ['GET', /^\/api\/documentos\/(\d+)$/, (req, res, [id]) => {
       const d = docOu404(id);
-      json(res, 200, { ...d, eventos: repo.listarEventos(d.empresa_id, d.chave) });
+      json(res, 200, {
+        ...d,
+        eventos: repo.listarEventos(d.empresa_id, d.chave),
+        divergencias: repo.listarDivergencias({ documentoId: d.id, limite: 100 }).itens,
+      });
     }],
 
     ['GET', /^\/api\/documentos\/(\d+)\/xml$/, (req, res, [id]) => {

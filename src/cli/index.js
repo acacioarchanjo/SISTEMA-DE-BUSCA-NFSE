@@ -14,7 +14,11 @@ import { gerarCsv } from '../exportador/planilha.js';
 import { iniciarAgendador } from '../agendador.js';
 import { gerarBackup } from '../backup.js';
 import { restaurarBackup, listarBackups, analisarBackup } from '../restaurar.js';
-import { formatarCnpj, somenteDigitos } from '../util/formatos.js';
+import { formatarCnpj, somenteDigitos, dataBR } from '../util/formatos.js';
+import { validarDocumentos } from '../fiscal/validacao.js';
+import { catalogoRegras } from '../fiscal/regras.js';
+import { CATALOGO } from '../execucao/catalogo.js';
+import { verificarAuditoria, listarAuditoria, exportarAuditoria } from '../auditoria.js';
 
 const repo = () => new Repositorio(obterBanco());
 
@@ -131,9 +135,12 @@ programa
   .action(async (ref, o) => {
     const r = repo();
     if (!ref) {
-      const resultados = await sincronizarTodas(r, { ignorarTrava: o.ignorarTrava });
+      const resultados = await sincronizarTodas(r, { ignorarTrava: o.ignorarTrava, disparo: { origem: 'cli' } });
       if (!resultados.length) console.log('Nenhuma empresa ativa cadastrada.');
-      for (const x of resultados) console.log(`${x.ok ? '✔' : '✖'} ${x.empresa}: ${x.mensagem}`);
+      for (const x of resultados) {
+        console.log(`${x.ok ? '✔' : '✖'} ${x.empresa} [${x.codigo}${x.subcodigo ? '/' + x.subcodigo : ''}]: ${x.mensagem}`);
+        if (!x.ok && CATALOGO[x.codigo]?.acao) console.log(`    → ${CATALOGO[x.codigo].acao}`);
+      }
       // código de saída ≠ 0 se alguma empresa falhou (aparece no Agendador de Tarefas)
       if (resultados.some((x) => !x.ok)) process.exitCode = 1;
       return;
@@ -143,7 +150,64 @@ programa
       ignorarTrava: o.ignorarTrava,
       aoProgredir: (p) => process.stdout.write(`\r  lote ${p.lotes} | NSU ${p.ultimoNsu} | novas ${p.novos} | eventos ${p.eventos}   `),
     });
-    console.log(`\n✔ ${e.razao_social}: ${res.mensagem}`);
+    console.log(`\n✔ ${e.razao_social} [${res.codigo}]: ${res.mensagem}`);
+  });
+
+programa
+  .command('validar [empresa]')
+  .description('roda a conferência fiscal (regras RET/ALQ/CMP/CAN) nas notas já baixadas')
+  .action((ref) => {
+    const r = repo();
+    const empresaId = ref ? empresaPor(r, ref).id : undefined;
+    const v = validarDocumentos(r, { empresaId, auditar: true });
+    console.log(`${v.documentos} nota(s) conferida(s): ${v.novas} divergência(s) nova(s), ${v.reabertas} reaberta(s), ${v.resolvidas} resolvida(s).`);
+    console.log(`Abertas: ${v.abertas.BLOQUEANTE} bloqueante(s), ${v.abertas.ALERTA} alerta(s), ${v.abertas.INFO} informativa(s).`);
+    if (v.abertas.BLOQUEANTE) process.exitCode = 1;
+  });
+
+programa
+  .command('divergencias [empresa]')
+  .description('lista as divergências fiscais abertas')
+  .option('-s, --severidade <s>', 'BLOQUEANTE | ALERTA | INFO')
+  .option('--todas', 'inclui resolvidas e ignoradas')
+  .option('--regras', 'mostra só o catálogo de regras')
+  .action((ref, o) => {
+    if (o.regras) return console.table(catalogoRegras());
+    const r = repo();
+    const empresaId = ref ? empresaPor(r, ref).id : undefined;
+    const { itens, total } = r.listarDivergencias({
+      empresaId, severidade: o.severidade?.toUpperCase(), status: o.todas ? undefined : 'aberta', limite: 500,
+    });
+    if (!itens.length) return console.log('Nenhuma divergência.');
+    console.table(itens.map((v) => ({
+      id: v.id, regra: v.codigo, severidade: v.severidade, status: v.status, competencia: dataBR(v.competencia).slice(3),
+      nota: v.numero, empresa: v.empresa_nome?.slice(0, 25), mensagem: v.mensagem.slice(0, 90),
+    })));
+    if (total > itens.length) console.log(`(mostrando ${itens.length} de ${total})`);
+  });
+
+programa
+  .command('auditoria <acao>')
+  .description('log de auditoria: verificar | listar | exportar')
+  .option('-n, --limite <n>', 'quantos registros listar', '30')
+  .option('-o, --saida <arquivo>', 'arquivo de saída (exportar)')
+  .action((acao, o) => {
+    const db = repo().db;
+    if (acao === 'verificar') {
+      const v = verificarAuditoria(db);
+      console.log(v.integra ? `✔ Cadeia íntegra: ${v.total} registro(s). Último hash: ${v.ultimoHash}` : `✖ CADEIA QUEBRADA no registro ${v.problemaEm}: ${v.motivo}`);
+      if (!v.integra) process.exitCode = 2;
+    } else if (acao === 'listar') {
+      console.table(listarAuditoria(db, { limite: o.limite }).map((x) => ({
+        id: x.id, quando: new Date(x.criado_em).toLocaleString('pt-BR'), tipo: x.tipo, cnpj: x.empresa_cnpj ?? '', status: x.payload.status ?? '', hash: x.hash_registro.slice(7, 19),
+      })));
+    } else if (acao === 'exportar') {
+      const saida = o.saida ?? `auditoria-${new Date().toISOString().slice(0, 10)}.json`;
+      fs.writeFileSync(saida, JSON.stringify(exportarAuditoria(db), null, 2));
+      console.log(`Auditoria exportada para ${saida}`);
+    } else {
+      throw new Error('Ação inválida. Use: verificar | listar | exportar');
+    }
   });
 
 programa
@@ -189,6 +253,8 @@ programa
       }
     }
     console.log(`${lista.length} arquivo(s): ${cont.nova} nota(s) nova(s), ${cont.existente} já existente(s), ${cont.evento} evento(s).`);
+    const v = validarDocumentos(r, { empresaId: e.id });
+    console.log(`Conferência fiscal: ${v.abertas.BLOQUEANTE} bloqueante(s), ${v.abertas.ALERTA} alerta(s), ${v.abertas.INFO} informativa(s) em aberto.`);
   });
 
 programa

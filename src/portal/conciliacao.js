@@ -8,6 +8,9 @@ import { requisicao, ClienteAdn } from '../adn/cliente.js';
 import { abrirCredenciais } from '../crypto/credenciais.js';
 import { registrarNfse } from '../adn/distribuicao.js';
 import { esperar } from '../util/formatos.js';
+import { classificarErro, statusLegado } from '../execucao/catalogo.js';
+import { registrarAuditoria } from '../auditoria.js';
+import { validarDocumentos } from '../fiscal/validacao.js';
 
 const RX_CHAVE = /\b\d{50}\b/g;
 
@@ -141,10 +144,23 @@ export async function conciliarEmpresa(repo, empresaId, { de, ate }, opcoes = {}
 
     const msg = `Portal: ${noPortal.size} nota(s) no período; ${faltantes.length} faltando no banco; ${baixadas} baixada(s).` +
       (falhas.length ? ` Falhas: ${falhas.slice(0, 5).join(' | ')}` : '');
-    repo.atualizarExecucao(execId, { status: 'ok', novos: baixadas, mensagem: msg, finalizar: true });
-    return { noPortal: noPortal.size, faltantes, baixadas, falhas, mensagem: msg };
+    if (baixadas) validarDocumentos(repo, { empresaId });
+    const codigo = falhas.length ? 'SUCESSO_PARCIAL' : baixadas ? 'SUCESSO' : 'SEM_MOVIMENTO';
+    repo.atualizarExecucao(execId, { status: statusLegado(codigo), codigo, novos: baixadas, mensagem: msg, finalizar: true, detalhes: { periodo: { de, ate }, faltantes, falhas } });
+    registrarAuditoria(repo.db, {
+      tipo: 'execucao.finalizada', empresaCnpj: empresa.cnpj, execucaoId: execId,
+      payload: { execucao_id: execId, rotina: 'conciliacao', conector: 'portal-emissor-nacional@experimental', metodo: 'WEB', empresa: { cnpj: empresa.cnpj, razao_social: empresa.razao_social }, status: codigo, periodo: { de, ate }, no_portal: noPortal.size, faltantes: faltantes.length, baixadas, falhas },
+    });
+    return { noPortal: noPortal.size, faltantes, baixadas, falhas, mensagem: msg, codigo };
   } catch (e) {
-    repo.atualizarExecucao(execId, { status: 'erro', mensagem: e.message, finalizar: true });
+    const { codigo, subcodigo } = classificarErro(e);
+    repo.atualizarExecucao(execId, { status: statusLegado(codigo), codigo, subcodigo, mensagem: e.message, finalizar: true });
+    try {
+      registrarAuditoria(repo.db, {
+        tipo: 'execucao.finalizada', empresaCnpj: empresa.cnpj, execucaoId: execId,
+        payload: { execucao_id: execId, rotina: 'conciliacao', empresa: { cnpj: empresa.cnpj }, status: codigo, subcodigo, mensagem: e.message, periodo: { de, ate } },
+      });
+    } catch { /* não esconder o erro original */ }
     throw e;
   } finally {
     clienteSefin?.fechar?.();
