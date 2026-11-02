@@ -76,11 +76,19 @@ REM 5) Porta configurada no .env (padrao 3000)
 set PORTA=3000
 for /f "tokens=2 delims==" %%p in ('findstr /b /c:"NFSE_SERVER_PORT=" .env') do set PORTA=%%p
 
-REM 6) Abre o navegador alguns segundos depois e sobe o servidor
+REM 6) Se o sistema ja esta aberto, so abre o navegador
+node -e "const s=require('net').connect(%PORTA%,'127.0.0.1');s.on('connect',()=>process.exit(1));s.on('error',()=>process.exit(0));setTimeout(()=>process.exit(0),800)"
+if errorlevel 1 (
+  echo O sistema ja esta aberto. Abrindo o painel no navegador...
+  start "" "http://127.0.0.1:%PORTA%"
+  exit /b 0
+)
+
+REM 7) Sobe o servidor e abre o navegador assim que ele responder
 echo Abrindo o painel em http://127.0.0.1:%PORTA%
 echo Para encerrar o sistema, feche esta janela ou aperte Ctrl+C.
 echo.
-start "" /b cmd /c "timeout /t 3 /nobreak >nul & start "" http://127.0.0.1:%PORTA%"
+start "" /b node src\util\abrir-navegador.js %PORTA%
 call npm.cmd start
 
 echo.
