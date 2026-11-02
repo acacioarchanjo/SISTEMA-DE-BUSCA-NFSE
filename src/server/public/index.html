@@ -8,142 +8,246 @@
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
 </head>
 <body>
-  <header class="topo">
-    <div class="marca">🔎 <strong>Buscador NFS-e</strong> <span id="ambiente" class="tag"></span></div>
-    <nav class="abas">
-      <button data-aba="empresas" class="ativa">Empresas</button>
-      <button data-aba="notas">Notas</button>
-      <button data-aba="execucoes">Execuções</button>
-      <button id="btn-encerrar" class="encerrar" title="Fecha o sistema (o servidor em segundo plano)">⏻ Encerrar</button>
-    </nav>
-  </header>
+  <!-- Ícones (sprite SVG) -->
+  <svg class="sprite" aria-hidden="true">
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></symbol>
+    <symbol id="i-building" viewBox="0 0 24 24"><path d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16M16 9h2a2 2 0 0 1 2 2v10M2 21h20M8 7h4M8 11h4M8 15h4"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v9M6.4 6.4a8 8 0 1 0 11.2 0"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 19h16"/></symbol>
+    <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20zM12 10v4M12 17h.01"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></symbol>
+    <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
+    <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M7 17 17 7M8 7h9v9"/></symbol>
+    <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M17 7 7 17M16 17H7V8"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 21V9M7 14l5-5 5 5M4 5h16"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></symbol>
+  </svg>
 
-  <section class="resumo" id="resumo"></section>
-  <div id="aviso" class="aviso oculto"></div>
-
-  <!-- EMPRESAS -->
-  <main id="aba-empresas" class="aba">
-    <div class="barra">
-      <h2>Empresas</h2>
-      <div class="acoes">
-        <button id="btn-buscar-todas" class="secundario">▶ Buscar todas</button>
-        <button id="btn-nova-empresa">+ Nova empresa</button>
+  <div class="app">
+    <!-- MENU LATERAL -->
+    <aside class="lateral">
+      <div class="marca">
+        <img src="favicon.svg" alt="" width="34" height="34">
+        <div><strong>Buscador</strong><span>NFS-e Nacional</span></div>
       </div>
-    </div>
-    <div class="tabela-wrap">
-      <table>
-        <thead><tr>
-          <th>Empresa</th><th>CNPJ</th><th>Certificado</th><th>Último NSU</th><th>Notas</th><th>Última busca</th><th></th>
-        </tr></thead>
-        <tbody id="lista-empresas"></tbody>
-      </table>
-    </div>
-  </main>
-
-  <!-- NOTAS -->
-  <main id="aba-notas" class="aba oculto">
-    <div class="barra">
-      <h2>Notas</h2>
-      <div class="acoes">
-        <button id="btn-csv" class="secundario">⬇ Planilha CSV</button>
-        <button id="btn-zip" class="secundario">⬇ ZIP de XMLs</button>
-        <label class="check"><input type="checkbox" id="zip-pdf"> incluir PDFs</label>
+      <nav class="menu">
+        <button data-aba="inicio" class="ativa"><svg><use href="#i-home"/></svg><span>Início</span></button>
+        <button data-aba="empresas"><svg><use href="#i-building"/></svg><span>Empresas</span><em id="cont-empresas"></em></button>
+        <button data-aba="notas"><svg><use href="#i-file"/></svg><span>Notas</span><em id="cont-notas"></em></button>
+        <button data-aba="execucoes"><svg><use href="#i-activity"/></svg><span>Execuções</span><i id="indicador-exec" class="pulso oculto"></i></button>
+      </nav>
+      <div class="lateral-rodape">
+        <div class="ambiente"><span class="ponto"></span>Ambiente <b id="ambiente">—</b></div>
+        <button id="btn-tema" class="botao-fantasma" title="Alternar tema claro/escuro"><svg><use href="#i-moon"/></svg><span>Tema</span></button>
+        <button id="btn-encerrar" class="botao-fantasma perigo" title="Fecha o sistema (o servidor em segundo plano)"><svg><use href="#i-power"/></svg><span>Encerrar</span></button>
       </div>
-    </div>
-    <form id="filtros" class="filtros">
-      <select name="empresa" id="filtro-empresa"><option value="">Todas as empresas</option></select>
-      <select name="papel">
-        <option value="">Emitidas e recebidas</option>
-        <option value="emitida">Emitidas</option>
-        <option value="recebida">Recebidas</option>
-        <option value="intermediario">Intermediário</option>
-      </select>
-      <select name="situacao">
-        <option value="">Qualquer situação</option>
-        <option value="normal">Normais</option>
-        <option value="cancelada">Canceladas</option>
-        <option value="substituida">Substituídas</option>
-      </select>
-      <label>Competência de <input type="date" name="de"></label>
-      <label>até <input type="date" name="ate"></label>
-      <input type="search" name="busca" placeholder="Número, chave, nome, CNPJ…">
-      <button type="submit">Filtrar</button>
-    </form>
-    <div id="totais" class="totais"></div>
-    <div class="tabela-wrap">
-      <table>
-        <thead><tr>
-          <th>Competência</th><th>Nº</th><th>Papel</th><th>Prestador</th><th>Tomador</th>
-          <th class="num">Valor</th><th class="num">ISS</th><th class="num">Retenções</th><th class="num">Líquido</th><th>Situação</th><th></th>
-        </tr></thead>
-        <tbody id="lista-notas"></tbody>
-      </table>
-    </div>
-    <div class="paginacao">
-      <button id="pag-ant" class="secundario">◀ Anterior</button>
-      <span id="pag-info"></span>
-      <button id="pag-prox" class="secundario">Próxima ▶</button>
-    </div>
-  </main>
+    </aside>
 
-  <!-- EXECUÇÕES -->
-  <main id="aba-execucoes" class="aba oculto">
-    <div class="barra"><h2>Execuções</h2></div>
-    <div class="tabela-wrap">
-      <table>
-        <thead><tr><th>#</th><th>Empresa</th><th>Tipo</th><th>Status</th><th>Início</th><th>Fim</th><th>Lotes</th><th>Novas</th><th>Mensagem</th></tr></thead>
-        <tbody id="lista-execucoes"></tbody>
-      </table>
+    <div class="conteudo">
+      <!-- INÍCIO -->
+      <main id="aba-inicio" class="aba">
+        <header class="cabecalho">
+          <div>
+            <h1 id="saudacao">Olá!</h1>
+            <p>Resumo das notas fiscais de serviço baixadas do Ambiente de Dados Nacional.</p>
+          </div>
+          <div class="acoes">
+            <button id="btn-buscar-todas-inicio" class="botao"><svg><use href="#i-refresh"/></svg>Buscar todas</button>
+          </div>
+        </header>
+
+        <section id="boas-vindas" class="cartao boas-vindas oculto">
+          <div>
+            <h2>Comece cadastrando uma empresa</h2>
+            <p>Envie o certificado digital A1 (.pfx) da empresa. Ele é cifrado e fica somente neste computador.</p>
+          </div>
+          <button class="botao" data-nova-empresa><svg><use href="#i-plus"/></svg>Nova empresa</button>
+        </section>
+
+        <section class="kpis" id="kpis"></section>
+
+        <div class="grade-2">
+          <section class="cartao">
+            <div class="cartao-topo"><h2>Alertas</h2></div>
+            <ul class="lista-alertas" id="alertas"></ul>
+          </section>
+          <section class="cartao">
+            <div class="cartao-topo">
+              <h2>Últimas execuções</h2>
+              <button class="link" data-ir="execucoes">Ver todas<svg><use href="#i-chev-r"/></svg></button>
+            </div>
+            <ul class="linha-tempo" id="ultimas-execucoes"></ul>
+          </section>
+        </div>
+      </main>
+
+      <!-- EMPRESAS -->
+      <main id="aba-empresas" class="aba oculto">
+        <header class="cabecalho">
+          <div>
+            <h1>Empresas</h1>
+            <p>Certificados cadastrados e situação da busca de cada empresa.</p>
+          </div>
+          <div class="acoes">
+            <button id="btn-buscar-todas" class="botao secundario"><svg><use href="#i-refresh"/></svg>Buscar todas</button>
+            <button id="btn-nova-empresa" class="botao"><svg><use href="#i-plus"/></svg>Nova empresa</button>
+          </div>
+        </header>
+        <div class="grade-empresas" id="lista-empresas"></div>
+      </main>
+
+      <!-- NOTAS -->
+      <main id="aba-notas" class="aba oculto">
+        <header class="cabecalho">
+          <div>
+            <h1>Notas</h1>
+            <p>Filtre, confira e exporte as NFS-e emitidas e recebidas.</p>
+          </div>
+          <div class="acoes">
+            <button id="btn-csv" class="botao secundario"><svg><use href="#i-download"/></svg>Planilha</button>
+            <div class="grupo-botao">
+              <button id="btn-zip" class="botao"><svg><use href="#i-download"/></svg>ZIP de XMLs</button>
+              <label class="check"><input type="checkbox" id="zip-pdf"> com PDFs</label>
+            </div>
+          </div>
+        </header>
+
+        <form id="filtros" class="cartao filtros">
+          <div class="busca">
+            <svg><use href="#i-search"/></svg>
+            <input type="search" name="busca" placeholder="Buscar por número, chave, nome ou CNPJ…">
+          </div>
+          <div class="segmentado" role="radiogroup" aria-label="Papel">
+            <label><input type="radio" name="papel" value="" checked><span>Todas</span></label>
+            <label><input type="radio" name="papel" value="emitida"><span>Emitidas</span></label>
+            <label><input type="radio" name="papel" value="recebida"><span>Recebidas</span></label>
+          </div>
+          <select name="empresa" id="filtro-empresa"><option value="">Todas as empresas</option></select>
+          <select name="situacao">
+            <option value="">Qualquer situação</option>
+            <option value="normal">Normais</option>
+            <option value="cancelada">Canceladas</option>
+            <option value="substituida">Substituídas</option>
+          </select>
+          <label class="campo-data"><span>Competência de</span><input type="date" name="de"></label>
+          <label class="campo-data"><span>até</span><input type="date" name="ate"></label>
+          <button type="submit" class="botao">Filtrar</button>
+        </form>
+
+        <div id="totais" class="totais"></div>
+
+        <div class="cartao tabela-wrap">
+          <table>
+            <thead><tr>
+              <th>Competência</th><th>Nº</th><th>Prestador</th><th>Tomador</th>
+              <th class="num">Valor</th><th class="num">ISS</th><th class="num col-ret">Retenções</th><th class="num">Líquido</th><th>Situação</th><th></th>
+            </tr></thead>
+            <tbody id="lista-notas"></tbody>
+          </table>
+        </div>
+        <div class="paginacao">
+          <button id="pag-ant" class="botao secundario icone-so" title="Anterior"><svg><use href="#i-chev-l"/></svg></button>
+          <span id="pag-info"></span>
+          <button id="pag-prox" class="botao secundario icone-so" title="Próxima"><svg><use href="#i-chev-r"/></svg></button>
+        </div>
+      </main>
+
+      <!-- EXECUÇÕES -->
+      <main id="aba-execucoes" class="aba oculto">
+        <header class="cabecalho">
+          <div>
+            <h1>Execuções</h1>
+            <p>Histórico das buscas no ADN e das conciliações. Atualiza sozinho enquanto há busca rodando.</p>
+          </div>
+        </header>
+        <div class="cartao tabela-wrap">
+          <table>
+            <thead><tr><th>Status</th><th>Empresa</th><th>Tipo</th><th>Início</th><th>Duração</th><th class="num">Lotes</th><th class="num">Novas</th><th>Mensagem</th></tr></thead>
+            <tbody id="lista-execucoes"></tbody>
+          </table>
+        </div>
+      </main>
+
+      <div id="tela-encerrado" class="encerrado oculto">
+        <div class="cartao">
+          <svg class="grande"><use href="#i-power"/></svg>
+          <h2>Sistema encerrado</h2>
+          <p>Pode fechar esta aba. Para abrir de novo, use o atalho “Buscador NFS-e” na Área de Trabalho.</p>
+        </div>
+      </div>
+
+      <footer>Uso educacional · dados armazenados localmente · <a href="https://www.nfse.gov.br" target="_blank" rel="noopener">nfse.gov.br</a></footer>
     </div>
-  </main>
+  </div>
 
   <!-- Diálogo: nova empresa -->
-  <dialog id="dlg-empresa">
+  <dialog id="dlg-empresa" class="modal">
     <form id="form-empresa" method="dialog">
-      <h3>Nova empresa</h3>
-      <p class="dica">O certificado A1 é cifrado (AES-256-GCM) e fica apenas neste computador.</p>
-      <label>Certificado A1 (.pfx / .p12) <input type="file" name="pfx" accept=".pfx,.p12" required></label>
-      <label>Senha do certificado <input type="password" name="senha" autocomplete="off"></label>
-      <label>CNPJ (opcional — lido do certificado) <input name="cnpj" inputmode="numeric" placeholder="00.000.000/0000-00"></label>
-      <label>Razão social (opcional) <input name="razaoSocial"></label>
+      <div class="modal-topo">
+        <h3>Nova empresa</h3>
+        <button type="button" class="botao-fantasma icone-so" data-fechar title="Fechar"><svg><use href="#i-x"/></svg></button>
+      </div>
+      <p class="dica"><svg><use href="#i-shield"/></svg>O certificado A1 é cifrado (AES-256-GCM) e fica apenas neste computador.</p>
+      <label class="soltar" id="area-pfx">
+        <svg><use href="#i-upload"/></svg>
+        <span id="nome-pfx"><b>Escolha o certificado</b> ou arraste aqui<br><small>.pfx ou .p12</small></span>
+        <input type="file" name="pfx" accept=".pfx,.p12" required>
+      </label>
+      <label class="campo"><span>Senha do certificado</span><input type="password" name="senha" autocomplete="off"></label>
+      <div class="linha-2">
+        <label class="campo"><span>CNPJ <small>(opcional)</small></span><input name="cnpj" inputmode="numeric" placeholder="lido do certificado"></label>
+        <label class="campo"><span>Razão social <small>(opcional)</small></span><input name="razaoSocial" placeholder="lida do certificado"></label>
+      </div>
       <div class="erro" id="erro-empresa"></div>
       <menu>
-        <button type="button" class="secundario" data-fechar>Cancelar</button>
-        <button type="submit">Salvar</button>
+        <button type="button" class="botao secundario" data-fechar>Cancelar</button>
+        <button type="submit" class="botao">Salvar empresa</button>
       </menu>
     </form>
   </dialog>
 
   <!-- Diálogo: conciliação -->
-  <dialog id="dlg-conciliar">
+  <dialog id="dlg-conciliar" class="modal">
     <form id="form-conciliar" method="dialog">
-      <h3>Conciliar com o portal <span class="tag">experimental</span></h3>
+      <div class="modal-topo">
+        <h3>Conciliar com o portal <span class="pilula">experimental</span></h3>
+        <button type="button" class="botao-fantasma icone-so" data-fechar title="Fechar"><svg><use href="#i-x"/></svg></button>
+      </div>
       <p class="dica">Entra no Emissor Nacional com o certificado, lista as notas do período e baixa as que não vieram pelo ADN.</p>
-      <label>De <input type="date" name="de" required></label>
-      <label>Até <input type="date" name="ate" required></label>
+      <div class="linha-2">
+        <label class="campo"><span>De</span><input type="date" name="de" required></label>
+        <label class="campo"><span>Até</span><input type="date" name="ate" required></label>
+      </div>
       <menu>
-        <button type="button" class="secundario" data-fechar>Cancelar</button>
-        <button type="submit">Conciliar</button>
+        <button type="button" class="botao secundario" data-fechar>Cancelar</button>
+        <button type="submit" class="botao">Conciliar</button>
       </menu>
     </form>
   </dialog>
 
-  <!-- Diálogo: detalhes da nota -->
-  <dialog id="dlg-nota">
+  <!-- Painel lateral: detalhes da nota -->
+  <dialog id="dlg-nota" class="gaveta">
+    <div class="modal-topo">
+      <h3 id="titulo-nota">Nota</h3>
+      <button type="button" class="botao-fantasma icone-so" data-fechar title="Fechar"><svg><use href="#i-x"/></svg></button>
+    </div>
     <div id="detalhe-nota"></div>
-    <menu><button type="button" data-fechar>Fechar</button></menu>
   </dialog>
 
   <input type="file" id="arquivo-importar" accept=".xml" multiple class="oculto">
+  <div id="toasts" class="toasts" aria-live="polite"></div>
 
-  <div id="tela-encerrado" class="encerrado oculto">
-    <div>
-      <h2>Sistema encerrado</h2>
-      <p>Pode fechar esta aba. Para abrir de novo, use o atalho “Buscador NFS-e” na Área de Trabalho.</p>
-    </div>
-  </div>
-
-  <footer>Uso educacional · dados armazenados localmente · <a href="https://www.nfse.gov.br" target="_blank" rel="noopener">nfse.gov.br</a></footer>
   <script type="module" src="app.js"></script>
 </body>
 </html>

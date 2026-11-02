@@ -1,16 +1,43 @@
 // Front-end do painel (JS puro, sem framework).
 const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const moeda = (v) => Number(v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const moedaCurta = (v) => Number(v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', notation: Math.abs(v) >= 1e6 ? 'compact' : 'standard', maximumFractionDigits: Math.abs(v) >= 1e6 ? 1 : 2 });
+const numero = (v) => Number(v ?? 0).toLocaleString('pt-BR');
 const dataBR = (iso) => (iso ? String(iso).slice(0, 10).split('-').reverse().join('/') : '—');
-const dataHora = (s) => (s ? new Date(s.includes('T') ? s : s.replace(' ', 'T') + 'Z').toLocaleString('pt-BR') : '—');
+const paraData = (s) => (s ? new Date(s.includes('T') ? s : s.replace(' ', 'T') + 'Z') : null);
+const dataHora = (s) => (s ? paraData(s).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—');
 const doc = (d) => {
   const c = String(d ?? '').replace(/\D/g, '');
   if (c.length === 14) return c.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
   if (c.length === 11) return c.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
-  return d ?? '—';
+  return d || '—';
 };
+const icone = (nome) => `<svg><use href="#i-${nome}"/></svg>`;
 const PAPEL = { emitida: 'Emitida', recebida: 'Recebida', intermediario: 'Intermediário', outro: 'Outro' };
+const TIPO_EXEC = { busca_adn: 'Busca no ADN', conciliacao: 'Conciliação' };
+const STATUS_EXEC = { ok: 'Concluída', erro: 'Erro', travada: 'Travada', executando: 'Executando' };
+
+function relativo(s) {
+  const d = paraData(s);
+  if (!d) return '—';
+  const seg = Math.round((Date.now() - d) / 1000);
+  if (seg < 60) return 'agora';
+  if (seg < 3600) return `há ${Math.floor(seg / 60)} min`;
+  if (seg < 86400) return `há ${Math.floor(seg / 3600)} h`;
+  if (seg < 86400 * 7) return `há ${Math.floor(seg / 86400)} d`;
+  return dataHora(s);
+}
+function duracao(ini, fim) {
+  const a = paraData(ini);
+  const b = fim ? paraData(fim) : new Date();
+  if (!a) return '—';
+  const s = Math.max(0, Math.round((b - a) / 1000));
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}min ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}min`;
+}
+const iniciais = (nome) =>
+  String(nome || '?').replace(/\b(LTDA|ME|EPP|S\/?A|EIRELI)\b\.?/gi, '').trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join('').toUpperCase() || '?';
 
 async function api(url, { metodo = 'GET', corpo } = {}) {
   const r = await fetch(url, {
@@ -23,12 +50,15 @@ async function api(url, { metodo = 'GET', corpo } = {}) {
   return dados;
 }
 
+// ---------------- Avisos (toasts) ----------------
 function avisar(msg, tipo = 'ok') {
-  const el = $('#aviso');
-  el.textContent = msg;
-  el.className = `aviso ${tipo}`;
-  clearTimeout(avisar.t);
-  avisar.t = setTimeout(() => el.classList.add('oculto'), 7000);
+  const el = document.createElement('div');
+  el.className = `toast ${tipo}`;
+  el.innerHTML = `<span class="ic">${icone(tipo === 'erro' ? 'alert' : 'check')}</span><p>${esc(msg)}</p><button title="Fechar">${icone('x')}</button>`;
+  const fechar = () => { el.classList.add('saindo'); setTimeout(() => el.remove(), 250); };
+  el.querySelector('button').addEventListener('click', fechar);
+  $('#toasts').append(el);
+  setTimeout(fechar, tipo === 'erro' ? 10000 : 6000);
 }
 
 const arquivoParaBase64 = (f) =>
@@ -39,80 +69,160 @@ const arquivoParaBase64 = (f) =>
     r.readAsDataURL(f);
   });
 
-// ---------------- Abas ----------------
-let abaAtual = 'empresas';
-document.querySelectorAll('[data-aba]').forEach((b) =>
-  b.addEventListener('click', () => {
-    abaAtual = b.dataset.aba;
-    document.querySelectorAll('[data-aba]').forEach((x) => x.classList.toggle('ativa', x === b));
-    document.querySelectorAll('.aba').forEach((a) => a.classList.toggle('oculto', a.id !== `aba-${abaAtual}`));
-    atualizar();
-  }),
-);
-document.querySelectorAll('[data-fechar]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close()));
+// ---------------- Tema ----------------
+const lerTema = () => { try { return localStorage.getItem('tema'); } catch { return null; } };
+function aplicarTema(t) {
+  if (t) document.documentElement.dataset.tema = t;
+  else delete document.documentElement.dataset.tema;
+  const escuro = t ? t === 'escuro' : matchMedia('(prefers-color-scheme: dark)').matches;
+  $('#btn-tema').innerHTML = `${icone(escuro ? 'sun' : 'moon')}<span>${escuro ? 'Tema claro' : 'Tema escuro'}</span>`;
+}
+aplicarTema(lerTema());
+$('#btn-tema').addEventListener('click', () => {
+  const atual = document.documentElement.dataset.tema || (matchMedia('(prefers-color-scheme: dark)').matches ? 'escuro' : 'claro');
+  const novo = atual === 'escuro' ? 'claro' : 'escuro';
+  try { localStorage.setItem('tema', novo); } catch { /* sem armazenamento */ }
+  aplicarTema(novo);
+});
 
-// ---------------- Resumo ----------------
-async function carregarResumo() {
-  const r = await api('/api/resumo');
-  $('#ambiente').textContent = r.ambiente;
-  $('#resumo').innerHTML = [
-    ['Empresas', r.empresas], ['Notas', r.documentos], ['Emitidas', r.emitidas], ['Recebidas', r.recebidas], ['Canceladas', r.canceladas],
-  ].map(([t, v]) => `<div><b>${esc(v)}</b><span>${t}</span></div>`).join('');
+// ---------------- Navegação ----------------
+let abaAtual = 'inicio';
+function irPara(aba) {
+  abaAtual = aba;
+  $$('.menu [data-aba]').forEach((x) => x.classList.toggle('ativa', x.dataset.aba === aba));
+  $$('.aba').forEach((a) => a.classList.toggle('oculto', a.id !== `aba-${aba}`));
+  window.scrollTo({ top: 0 });
+  atualizar();
+}
+$$('[data-aba]').forEach((b) => b.addEventListener('click', () => irPara(b.dataset.aba)));
+document.addEventListener('click', (ev) => {
+  const ir = ev.target.closest('[data-ir]');
+  if (ir) irPara(ir.dataset.ir);
+  if (ev.target.closest('[data-nova-empresa]')) abrirNovaEmpresa();
+  // fecha menus "mais ações" ao clicar fora
+  $$('details.mais[open]').forEach((d) => { if (!d.contains(ev.target)) d.open = false; });
+});
+$$('[data-fechar]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close()));
+$$('dialog').forEach((d) => d.addEventListener('click', (ev) => { if (ev.target === d) d.close(); })); // clique no fundo fecha
+
+// ---------------- Início ----------------
+function saudacao() {
+  const h = new Date().getHours();
+  $('#saudacao').textContent = h < 12 ? 'Bom dia!' : h < 18 ? 'Boa tarde!' : 'Boa noite!';
+}
+
+async function carregarInicio(resumo) {
+  saudacao();
+  const [emit, receb] = await Promise.all([
+    api('/api/documentos?papel=emitida&limite=1'),
+    api('/api/documentos?papel=recebida&limite=1'),
+  ]);
+  const kpis = [
+    ['', 'building', 'Empresas', numero(resumo.empresas), 'com certificado cadastrado'],
+    ['info', 'file', 'Notas baixadas', numero(resumo.documentos), `${numero(resumo.emitidas)} emitidas · ${numero(resumo.recebidas)} recebidas`],
+    ['ok', 'arrow-up', 'Serviços prestados', moedaCurta(emit.totais.valor_servico), `retenções ${moedaCurta(emit.totais.valor_retencoes)}`],
+    ['', 'arrow-down', 'Serviços tomados', moedaCurta(receb.totais.valor_servico), `ISS ${moedaCurta(receb.totais.valor_iss)}`],
+    ['erro', 'x', 'Canceladas', numero(resumo.canceladas), 'notas com evento de cancelamento'],
+  ];
+  $('#kpis').innerHTML = kpis
+    .map(([cls, ic, t, v, s]) => `<div class="cartao kpi ${cls}"><div class="kpi-topo"><span class="kpi-icone">${icone(ic)}</span>${t}</div><b>${esc(v)}</b><small>${esc(s)}</small></div>`)
+    .join('');
+  $('#boas-vindas').classList.toggle('oculto', resumo.empresas > 0);
+
+  // Alertas
+  const alertas = [];
+  for (const e of empresas) {
+    const d = e.dias_para_vencer;
+    if (d != null && d < 0) alertas.push(['erro', 'alert', `Certificado vencido — ${e.razao_social}`, 'Cadastre o certificado novo em “Nova empresa”.']);
+    else if (d != null && d <= 30) alertas.push(['alerta', 'alert', `Certificado vence em ${d} dia(s) — ${e.razao_social}`, `Válido até ${dataBR(e.cert_valido_ate)}.`]);
+    if (e.trava_ate && new Date(e.trava_ate) > new Date())
+      alertas.push(['alerta', 'alert', `Busca pausada — ${e.razao_social}`, `Proteção contra consumo indevido até ${dataHora(e.trava_ate)}.`]);
+    const ult = execucoes.find((x) => x.empresa_id === e.id && x.status !== 'executando');
+    if (ult?.status === 'erro') alertas.push(['erro', 'alert', `Última busca falhou — ${e.razao_social}`, ult.mensagem ?? '']);
+  }
+  $('#alertas').innerHTML = alertas.length
+    ? alertas.map(([c, ic, t, s]) => `<li class="${c}"><span class="ic">${icone(ic)}</span><div><b>${esc(t)}</b><span>${esc(s)}</span></div></li>`).join('')
+    : `<li class="ok"><span class="ic">${icone('check')}</span><div><b>Tudo certo</b><span>Nenhum certificado vencendo e nenhuma busca com erro.</span></div></li>`;
+
+  // Últimas execuções
+  const ult = execucoes.slice(0, 6);
+  $('#ultimas-execucoes').innerHTML = ult.length
+    ? ult.map((x) => `<li class="${x.status}"><span class="marcador"></span><div class="texto"><b>${esc(x.empresa_nome ?? '—')}</b><span>${esc(TIPO_EXEC[x.tipo] ?? x.tipo)} · ${esc(x.status === 'executando' ? 'em andamento…' : x.mensagem ?? STATUS_EXEC[x.status])}</span></div><time>${esc(relativo(x.inicio))}</time></li>`).join('')
+    : '<li class="vazio-mini">Nenhuma busca ainda.</li>';
 }
 
 // ---------------- Empresas ----------------
 let empresas = [];
 async function carregarEmpresas() {
   empresas = await api('/api/empresas');
+  $('#cont-empresas').textContent = empresas.length || '';
   const sel = $('#filtro-empresa');
   const atual = sel.value;
-  sel.innerHTML = '<option value="">Todas as empresas</option>' +
-    empresas.map((e) => `<option value="${e.id}">${esc(e.razao_social)}</option>`).join('');
+  sel.innerHTML = '<option value="">Todas as empresas</option>' + empresas.map((e) => `<option value="${e.id}">${esc(e.razao_social)}</option>`).join('');
   sel.value = atual;
 
   $('#lista-empresas').innerHTML = empresas.length
-    ? empresas.map((e) => {
-        const dias = e.dias_para_vencer;
-        const cert = dias == null ? '<span class="tag">?</span>'
-          : dias < 0 ? '<span class="tag erro">vencido</span>'
-          : dias <= 30 ? `<span class="tag alerta">vence em ${dias}d</span>`
-          : `<span class="tag ok">até ${dataBR(e.cert_valido_ate)}</span>`;
-        const travada = e.trava_ate && new Date(e.trava_ate) > new Date();
-        return `<tr>
-          <td>${esc(e.razao_social)} ${e.ativo ? '' : '<span class="tag">inativa</span>'} ${travada ? `<span class="tag alerta" title="Proteção contra consumo indevido">travada até ${esc(dataHora(e.trava_ate))}</span>` : ''}</td>
-          <td>${esc(doc(e.cnpj))}</td>
-          <td>${cert}</td>
-          <td class="num">${esc(e.ultimo_nsu)}</td>
-          <td class="num">${esc(e.total_documentos)}</td>
-          <td>${esc(dataHora(e.ultima_busca))}</td>
-          <td><div class="acoes">
-            <button class="mini" data-acao="buscar" data-id="${e.id}" ${e.ativo ? '' : 'disabled'}>▶ Buscar</button>
-            <button class="mini secundario" data-acao="notas" data-id="${e.id}">Notas</button>
-            <button class="mini secundario" data-acao="conciliar" data-id="${e.id}">Conciliar</button>
-            <button class="mini secundario" data-acao="importar" data-id="${e.id}">Importar XML</button>
-            ${travada ? `<button class="mini secundario" data-acao="destravar" data-id="${e.id}">Destravar</button>` : ''}
-            <button class="mini secundario" data-acao="ativo" data-id="${e.id}" data-ativo="${e.ativo ? 0 : 1}">${e.ativo ? 'Desativar' : 'Ativar'}</button>
-            <button class="mini secundario perigo" data-acao="excluir" data-id="${e.id}">Excluir</button>
-          </div></td></tr>`;
-      }).join('')
-    : '<tr><td colspan="7" class="vazio">Nenhuma empresa cadastrada. Clique em “+ Nova empresa”.</td></tr>';
+    ? empresas.map(cartaoEmpresa).join('')
+    : `<div class="cartao vazio-grande">${icone('building')}<h3>Nenhuma empresa cadastrada</h3><p>Cadastre o certificado A1 de uma empresa para começar a baixar as notas.</p><button class="botao" data-nova-empresa>${icone('plus')}Nova empresa</button></div>`;
+}
+
+function cartaoEmpresa(e) {
+  const d = e.dias_para_vencer;
+  const cert = d == null ? '<span class="pilula">certificado ?</span>'
+    : d < 0 ? '<span class="pilula erro">certificado vencido</span>'
+    : d <= 30 ? `<span class="pilula alerta">vence em ${d}d</span>`
+    : `<span class="pilula ok">válido até ${dataBR(e.cert_valido_ate)}</span>`;
+  const travada = e.trava_ate && new Date(e.trava_ate) > new Date();
+  const rodando = execucoes.some((x) => x.empresa_id === e.id && x.status === 'executando');
+  return `<article class="cartao empresa ${e.ativo ? '' : 'inativa'}">
+    <div class="empresa-topo">
+      <span class="avatar">${esc(iniciais(e.razao_social))}</span>
+      <div class="empresa-nome"><b title="${esc(e.razao_social)}">${esc(e.razao_social)}</b><span>${esc(doc(e.cnpj))}</span></div>
+    </div>
+    <div class="empresa-selos">${cert}
+      ${e.ativo ? '' : '<span class="pilula">inativa</span>'}
+      ${travada ? `<span class="pilula alerta" title="Proteção contra consumo indevido">pausada até ${esc(dataHora(e.trava_ate))}</span>` : ''}
+      ${rodando ? '<span class="pilula executando">buscando…</span>' : ''}
+    </div>
+    <div class="empresa-numeros">
+      <div><small>Notas</small><b>${numero(e.total_documentos)}</b></div>
+      <div><small>Último NSU</small><b>${numero(e.ultimo_nsu)}</b></div>
+      <div><small>Última busca</small><b title="${esc(dataHora(e.ultima_busca))}">${esc(e.ultima_busca ? relativo(e.ultima_busca) : 'nunca')}</b></div>
+    </div>
+    <div class="empresa-acoes">
+      <button class="botao" data-acao="buscar" data-id="${e.id}" ${e.ativo && !rodando ? '' : 'disabled'}>${icone('play')}${rodando ? 'Buscando…' : 'Buscar notas'}</button>
+      <button class="botao secundario" data-acao="notas" data-id="${e.id}">Ver notas</button>
+      <details class="mais">
+        <summary class="botao secundario icone-so" title="Mais ações">${icone('dots')}</summary>
+        <div class="mais-menu">
+          <button class="botao-fantasma" data-acao="conciliar" data-id="${e.id}">Conciliar com o portal</button>
+          <button class="botao-fantasma" data-acao="importar" data-id="${e.id}">Importar XMLs</button>
+          ${travada ? `<button class="botao-fantasma" data-acao="destravar" data-id="${e.id}">Liberar busca agora</button>` : ''}
+          <button class="botao-fantasma" data-acao="ativo" data-id="${e.id}" data-ativo="${e.ativo ? 0 : 1}">${e.ativo ? 'Desativar empresa' : 'Ativar empresa'}</button>
+          <hr>
+          <button class="botao-fantasma perigo" data-acao="excluir" data-id="${e.id}">Excluir empresa</button>
+        </div>
+      </details>
+    </div>
+  </article>`;
 }
 
 let empresaSelecionada = null;
 $('#lista-empresas').addEventListener('click', async (ev) => {
   const b = ev.target.closest('button[data-acao]');
   if (!b) return;
+  b.closest('details')?.removeAttribute('open');
   const id = Number(b.dataset.id);
   const emp = empresas.find((e) => e.id === id);
   try {
     switch (b.dataset.acao) {
       case 'buscar':
-        avisar((await api(`/api/empresas/${id}/buscar`, { metodo: 'POST' })).mensagem);
-        setTimeout(atualizar, 800);
+        avisar((await api(`/api/empresas/${id}/buscar`, { metodo: 'POST' })).mensagem + ' Acompanhe em Execuções.');
+        setTimeout(atualizar, 600);
         break;
       case 'notas':
         $('#filtro-empresa').value = String(id);
-        document.querySelector('[data-aba="notas"]').click();
+        irPara('notas');
         break;
       case 'conciliar': {
         empresaSelecionada = id;
@@ -147,10 +257,32 @@ $('#lista-empresas').addEventListener('click', async (ev) => {
   }
 });
 
-$('#btn-nova-empresa').addEventListener('click', () => {
+// Nova empresa (com arrastar e soltar do .pfx)
+function abrirNovaEmpresa() {
   $('#form-empresa').reset();
   $('#erro-empresa').textContent = '';
+  $('#area-pfx').classList.remove('escolhido');
+  $('#nome-pfx').innerHTML = '<b>Escolha o certificado</b> ou arraste aqui<br><small>.pfx ou .p12</small>';
   $('#dlg-empresa').showModal();
+}
+$('#btn-nova-empresa').addEventListener('click', abrirNovaEmpresa);
+
+const inputPfx = $('#form-empresa').pfx;
+function mostrarPfx() {
+  const f = inputPfx.files[0];
+  $('#area-pfx').classList.toggle('escolhido', !!f);
+  if (f) $('#nome-pfx').innerHTML = `<b>${esc(f.name)}</b><br><small>${(f.size / 1024).toFixed(1)} KB · clique para trocar</small>`;
+}
+inputPfx.addEventListener('change', mostrarPfx);
+const area = $('#area-pfx');
+['dragenter', 'dragover'].forEach((t) => area.addEventListener(t, (ev) => { ev.preventDefault(); area.classList.add('arrastando'); }));
+['dragleave', 'drop'].forEach((t) => area.addEventListener(t, () => area.classList.remove('arrastando')));
+area.addEventListener('drop', (ev) => {
+  ev.preventDefault();
+  if (ev.dataTransfer.files.length) {
+    inputPfx.files = ev.dataTransfer.files;
+    mostrarPfx();
+  }
 });
 
 $('#form-empresa').addEventListener('submit', async (ev) => {
@@ -158,18 +290,20 @@ $('#form-empresa').addEventListener('submit', async (ev) => {
   const f = ev.target;
   const botao = f.querySelector('button[type=submit]');
   botao.disabled = true;
+  botao.textContent = 'Validando certificado…';
   try {
     const r = await api('/api/empresas', {
       metodo: 'POST',
       corpo: { pfxBase64: await arquivoParaBase64(f.pfx.files[0]), senha: f.senha.value, cnpj: f.cnpj.value, razaoSocial: f.razaoSocial.value },
     });
     $('#dlg-empresa').close();
-    avisar(`Empresa ${r.empresa.razao_social} salva. Certificado válido até ${dataBR(r.certificado.validoAte)}.`);
-    atualizar();
+    avisar(`${r.empresa.razao_social} cadastrada. Certificado válido até ${dataBR(r.certificado.validoAte)}.`);
+    irPara('empresas');
   } catch (e) {
     $('#erro-empresa').textContent = e.message;
   } finally {
     botao.disabled = false;
+    botao.textContent = 'Salvar empresa';
   }
 });
 
@@ -179,7 +313,8 @@ $('#form-conciliar').addEventListener('submit', async (ev) => {
   try {
     const r = await api(`/api/empresas/${empresaSelecionada}/conciliar`, { metodo: 'POST', corpo: { de: f.de.value, ate: f.ate.value } });
     $('#dlg-conciliar').close();
-    avisar(r.mensagem + ' Acompanhe na aba Execuções.');
+    avisar(r.mensagem + ' Acompanhe em Execuções.');
+    setTimeout(atualizar, 600);
   } catch (e) {
     avisar(e.message, 'erro');
   }
@@ -199,14 +334,16 @@ $('#arquivo-importar').addEventListener('change', async (ev) => {
   }
 });
 
-$('#btn-buscar-todas').addEventListener('click', async () => {
+async function buscarTodas() {
   try {
     avisar((await api('/api/buscar-todas', { metodo: 'POST' })).mensagem);
-    setTimeout(atualizar, 800);
+    setTimeout(atualizar, 600);
   } catch (e) {
     avisar(e.message, 'erro');
   }
-});
+}
+$('#btn-buscar-todas').addEventListener('click', buscarTodas);
+$('#btn-buscar-todas-inicio').addEventListener('click', buscarTodas);
 
 // ---------------- Notas ----------------
 const POR_PAGINA = 100;
@@ -222,29 +359,30 @@ async function carregarNotas() {
   p.set('limite', POR_PAGINA);
   p.set('offset', pagina * POR_PAGINA);
   const { itens, totais } = await api(`/api/documentos?${p}`);
-  $('#totais').innerHTML = `<span><b>${totais.quantidade}</b> nota(s)</span>
-    <span>Serviços: <b>${moeda(totais.valor_servico)}</b></span><span>ISS: <b>${moeda(totais.valor_iss)}</b></span>
-    <span>Retenções: <b>${moeda(totais.valor_retencoes)}</b></span><span>Líquido: <b>${moeda(totais.valor_liquido)}</b></span>`;
+  const chip = (t, v) => `<div class="chip"><small>${t}</small><b>${v}</b></div>`;
+  $('#totais').innerHTML =
+    chip('Notas', numero(totais.quantidade)) + chip('Valor dos serviços', moeda(totais.valor_servico)) +
+    chip('ISS', moeda(totais.valor_iss)) + chip('Retenções', moeda(totais.valor_retencoes)) + chip('Valor líquido', moeda(totais.valor_liquido));
+
   $('#lista-notas').innerHTML = itens.length
-    ? itens.map((d) => `<tr>
+    ? itens.map((d) => `<tr class="${d.situacao !== 'normal' ? 'cancelada-linha' : ''}">
         <td>${dataBR(d.competencia)}</td>
-        <td>${esc(d.numero)}</td>
-        <td class="nome">${PAPEL[d.papel] ?? esc(d.papel)}<span class="sub">${esc(d.empresa_nome)}</span></td>
-        <td class="nome">${esc(d.prestador_nome)}<span class="sub">${esc(doc(d.prestador_doc))}</span></td>
-        <td class="nome">${esc(d.tomador_nome ?? '—')}<span class="sub">${esc(d.tomador_doc ? doc(d.tomador_doc) : '')}</span></td>
+        <td><b>${esc(d.numero ?? '—')}</b><span class="sub papel ${esc(d.papel)}">${icone(d.papel === 'recebida' ? 'arrow-down' : 'arrow-up')}${esc(PAPEL[d.papel] ?? d.papel)}</span></td>
+        <td class="nome"><b>${esc(d.prestador_nome ?? '—')}</b><span class="sub">${esc(doc(d.prestador_doc))}</span></td>
+        <td class="nome"><b>${esc(d.tomador_nome ?? '—')}</b><span class="sub">${esc(d.tomador_doc ? doc(d.tomador_doc) : '')}</span></td>
         <td class="num">${moeda(d.valor_servico)}</td>
         <td class="num">${moeda(d.valor_iss)}${d.iss_retido ? '<span class="sub">retido</span>' : ''}</td>
-        <td class="num">${moeda(d.valor_total_retencoes)}</td>
-        <td class="num">${moeda(d.valor_liquido)}</td>
-        <td>${d.situacao === 'normal' ? '<span class="tag ok">normal</span>' : `<span class="tag erro">${esc(d.situacao)}</span>`}</td>
+        <td class="num col-ret">${moeda(d.valor_total_retencoes)}</td>
+        <td class="num"><b>${moeda(d.valor_liquido)}</b></td>
+        <td>${d.situacao === 'normal' ? '<span class="pilula ok">normal</span>' : `<span class="pilula erro">${esc(d.situacao)}</span>`}</td>
         <td><div class="acoes">
-          <button class="mini secundario" data-ver="${d.id}">Detalhes</button>
-          <a class="mini" href="/api/documentos/${d.id}/xml">XML</a>
-          <a class="mini" href="/api/documentos/${d.id}/pdf">PDF</a>
+          <button class="icone-acao" data-ver="${d.id}" title="Detalhes">${icone('search')}</button>
+          <a class="icone-acao" href="/api/documentos/${d.id}/xml" title="Baixar XML">XML</a>
+          <a class="icone-acao" href="/api/documentos/${d.id}/pdf" title="Baixar PDF">PDF</a>
         </div></td></tr>`).join('')
-    : '<tr><td colspan="11" class="vazio">Nenhuma nota encontrada.</td></tr>';
+    : '<tr><td colspan="10" class="vazio">Nenhuma nota encontrada com esses filtros.</td></tr>';
   const total = totais.quantidade;
-  $('#pag-info').textContent = total ? `${pagina * POR_PAGINA + 1}–${Math.min((pagina + 1) * POR_PAGINA, total)} de ${total}` : '';
+  $('#pag-info').textContent = total ? `${numero(pagina * POR_PAGINA + 1)}–${numero(Math.min((pagina + 1) * POR_PAGINA, total))} de ${numero(total)}` : '';
   $('#pag-ant').disabled = pagina === 0;
   $('#pag-prox').disabled = (pagina + 1) * POR_PAGINA >= total;
 }
@@ -254,55 +392,99 @@ $('#filtros').addEventListener('submit', (ev) => {
   pagina = 0;
   carregarNotas().catch((e) => avisar(e.message, 'erro'));
 });
+$$('#filtros input[type=radio], #filtros select').forEach((el) =>
+  el.addEventListener('change', () => { pagina = 0; carregarNotas().catch((e) => avisar(e.message, 'erro')); }),
+);
 $('#pag-ant').addEventListener('click', () => { pagina--; carregarNotas(); });
 $('#pag-prox').addEventListener('click', () => { pagina++; carregarNotas(); });
 $('#btn-csv').addEventListener('click', () => { location.href = `/api/exportar/csv?${paramsFiltro()}`; });
 $('#btn-zip').addEventListener('click', async () => {
   const p = paramsFiltro();
   if ($('#zip-pdf').checked) p.set('pdf', '1');
-  // checa antes para mostrar erro amigável se não houver notas
   const { totais } = await api(`/api/documentos?${paramsFiltro()}&limite=1`);
   if (!totais.quantidade) return avisar('Nenhuma nota para exportar com esses filtros.', 'erro');
+  avisar(`Gerando ZIP com ${numero(totais.quantidade)} nota(s)…`);
   location.href = `/api/exportar/zip?${p}`;
 });
 
 $('#lista-notas').addEventListener('click', async (ev) => {
   const b = ev.target.closest('[data-ver]');
   if (!b) return;
-  const d = await api(`/api/documentos/${b.dataset.ver}`);
-  const linhas = [
-    ['Chave', d.chave], ['Número', d.numero], ['Emissão', dataHora(d.data_emissao)], ['Competência', dataBR(d.competencia)],
-    ['Origem', d.origem], ['NSU', d.nsu], ['Prestador', `${d.prestador_nome ?? ''} — ${doc(d.prestador_doc)}`],
-    ['Tomador', `${d.tomador_nome ?? '—'} ${d.tomador_doc ? '— ' + doc(d.tomador_doc) : ''}`],
-    ['Município incidência', d.municipio_incidencia], ['Serviço', `${d.codigo_servico ?? ''} ${d.descricao ?? ''}`],
-    ['Valor do serviço', moeda(d.valor_servico)], ['Deduções', moeda(d.valor_deducoes)], ['Base de cálculo', moeda(d.base_calculo)],
-    ['Alíquota', `${d.aliquota}%`], ['ISS', `${moeda(d.valor_iss)}${d.iss_retido ? ' (retido)' : ''}`],
-    ['PIS / COFINS', `${moeda(d.valor_pis)} / ${moeda(d.valor_cofins)}${d.pis_cofins_retido ? ' (retidos)' : ''}`],
-    ['CSLL / IRRF / INSS', `${moeda(d.valor_csll)} / ${moeda(d.valor_irrf)} / ${moeda(d.valor_inss)}`],
-    ['Total retenções', moeda(d.valor_total_retencoes)], ['Valor líquido', moeda(d.valor_liquido)], ['Situação', d.situacao],
-  ];
-  $('#detalhe-nota').innerHTML = `<h3>NFS-e ${esc(d.numero ?? '')}</h3>
-    <dl class="detalhe">${linhas.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
-    ${d.eventos.length ? `<h4>Eventos</h4><ul>${d.eventos.map((e) => `<li>${esc(dataHora(e.data_evento))} — ${esc(e.tipo_evento)} ${esc(e.descricao)}</li>`).join('')}</ul>` : ''}`;
-  $('#dlg-nota').showModal();
+  try {
+    abrirNota(await api(`/api/documentos/${b.dataset.ver}`));
+  } catch (e) {
+    avisar(e.message, 'erro');
+  }
 });
 
+function abrirNota(d) {
+  const dl = (linhas) => `<dl class="detalhe">${linhas.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`;
+  $('#titulo-nota').textContent = `NFS-e nº ${d.numero ?? '—'}`;
+  $('#detalhe-nota').innerHTML = `
+    <div class="nota-cabecalho">
+      <small class="sub">Valor líquido</small>
+      <div class="valor">${moeda(d.valor_liquido)}</div>
+      <div class="linha">
+        <span class="pilula ${d.papel === 'emitida' ? 'ok' : 'primaria'}">${esc(PAPEL[d.papel] ?? d.papel)}</span>
+        <span class="pilula ${d.situacao === 'normal' ? 'ok' : 'erro'}">${esc(d.situacao)}</span>
+        <span class="pilula sem-ponto">competência ${dataBR(d.competencia)}</span>
+      </div>
+    </div>
+    <div class="secao-nota"><h4>Partes</h4>${dl([
+      ['Prestador', `${esc(d.prestador_nome ?? '—')}<span class="sub">${esc(doc(d.prestador_doc))}</span>`],
+      ['Tomador', `${esc(d.tomador_nome ?? '—')}<span class="sub">${esc(d.tomador_doc ? doc(d.tomador_doc) : '')}</span>`],
+    ])}</div>
+    <div class="secao-nota"><h4>Serviço</h4>${dl([
+      ['Código', esc(d.codigo_servico ?? '—')],
+      ['Descrição', esc(d.descricao ?? '—')],
+      ['Município (ISS)', esc(d.municipio_incidencia ?? '—')],
+      ['Emissão', esc(dataHora(d.data_emissao))],
+    ])}</div>
+    <div class="secao-nota"><h4>Valores</h4>${dl([
+      ['Valor do serviço', moeda(d.valor_servico)],
+      ['Deduções', moeda(d.valor_deducoes)],
+      ['Base de cálculo', moeda(d.base_calculo)],
+      ['ISS', `${moeda(d.valor_iss)} · ${esc(d.aliquota)}%${d.iss_retido ? ' <span class="pilula alerta sem-ponto">retido</span>' : ''}`],
+      ['PIS / COFINS', `${moeda(d.valor_pis)} / ${moeda(d.valor_cofins)}${d.pis_cofins_retido ? ' <span class="pilula alerta sem-ponto">retidos</span>' : ''}`],
+      ['CSLL / IRRF / INSS', `${moeda(d.valor_csll)} / ${moeda(d.valor_irrf)} / ${moeda(d.valor_inss)}`],
+      ['Total de retenções', `<b>${moeda(d.valor_total_retencoes)}</b>`],
+    ])}</div>
+    <div class="secao-nota"><h4>Identificação</h4>${dl([
+      ['Chave de acesso', `<span class="chave">${esc(d.chave)}</span>`],
+      ['Origem', esc({ adn: 'ADN (distribuição)', conciliacao: 'Conciliação', importacao: 'Importação manual' }[d.origem] ?? d.origem)],
+      ['NSU', esc(d.nsu ?? '—')],
+    ])}</div>
+    ${d.eventos.length ? `<div class="secao-nota"><h4>Eventos</h4><ul class="linha-tempo">${d.eventos
+      .map((e) => `<li class="erro"><span class="marcador"></span><div class="texto"><b>${esc(e.descricao)}</b><span>código ${esc(e.tipo_evento)}</span></div><time>${esc(dataHora(e.data_evento))}</time></li>`)
+      .join('')}</ul></div>` : ''}
+    <div class="acoes">
+      <a class="botao secundario" href="/api/documentos/${d.id}/xml">${icone('download')}XML</a>
+      <a class="botao secundario" href="/api/documentos/${d.id}/pdf">${icone('download')}PDF</a>
+    </div>`;
+  $('#dlg-nota').showModal();
+}
+
 // ---------------- Execuções ----------------
+let execucoes = [];
 let haExecutando = false;
 async function carregarExecucoes() {
-  const lista = await api('/api/execucoes?limite=50');
-  haExecutando = lista.some((x) => x.status === 'executando');
-  const cls = { ok: 'ok', erro: 'erro', travada: 'alerta', executando: 'alerta' };
-  $('#lista-execucoes').innerHTML = lista.length
-    ? lista.map((x) => `<tr>
-        <td>${x.id}</td><td>${esc(x.empresa_nome ?? '—')}</td><td>${esc(x.tipo)}</td>
-        <td><span class="tag ${cls[x.status] ?? ''}">${esc(x.status)}</span></td>
-        <td>${esc(dataHora(x.inicio))}</td><td>${esc(dataHora(x.fim))}</td>
-        <td class="num">${x.lotes ?? 0}</td><td class="num">${x.novos ?? 0}</td><td class="quebra">${esc(x.mensagem ?? '')}</td></tr>`).join('')
-    : '<tr><td colspan="9" class="vazio">Nenhuma execução ainda.</td></tr>';
+  execucoes = await api('/api/execucoes?limite=50');
+  haExecutando = execucoes.some((x) => x.status === 'executando');
+  $('#indicador-exec').classList.toggle('oculto', !haExecutando);
+  $('#lista-execucoes').innerHTML = execucoes.length
+    ? execucoes.map((x) => `<tr>
+        <td><span class="pilula ${esc(x.status)}">${esc(STATUS_EXEC[x.status] ?? x.status)}</span></td>
+        <td class="nome"><b>${esc(x.empresa_nome ?? '—')}</b></td>
+        <td>${esc(TIPO_EXEC[x.tipo] ?? x.tipo)}</td>
+        <td title="${esc(dataHora(x.inicio))}">${esc(relativo(x.inicio))}</td>
+        <td>${esc(duracao(x.inicio, x.fim))}</td>
+        <td class="num">${numero(x.lotes)}</td><td class="num">${numero(x.novos)}</td>
+        <td class="quebra">${esc(x.mensagem ?? '')}</td></tr>`).join('')
+    : '<tr><td colspan="8" class="vazio">Nenhuma execução ainda. Clique em “Buscar notas” numa empresa.</td></tr>';
 }
 
 // ---------------- Encerrar ----------------
+let encerrado = false;
 $('#btn-encerrar').addEventListener('click', async () => {
   const rodando = haExecutando ? '\n\nATENÇÃO: há uma busca em andamento; ela será interrompida e continua de onde parou na próxima vez.' : '';
   if (!confirm('Encerrar o Buscador NFS-e?' + rodando)) return;
@@ -312,17 +494,21 @@ $('#btn-encerrar').addEventListener('click', async () => {
     return avisar(e.message, 'erro');
   }
   encerrado = true;
-  document.querySelectorAll('main, .resumo, .topo nav').forEach((el) => el.classList.add('oculto'));
+  document.body.classList.add('desligado');
+  $$('main').forEach((el) => el.classList.add('oculto'));
   $('#tela-encerrado').classList.remove('oculto');
 });
-let encerrado = false;
 
 // ---------------- Ciclo ----------------
 async function atualizar() {
+  if (encerrado) return;
   try {
-    await carregarResumo();
-    await carregarEmpresas();
+    const resumo = await api('/api/resumo');
+    $('#ambiente').textContent = { producao: 'Produção', homologacao: 'Homologação' }[resumo.ambiente] ?? resumo.ambiente;
+    $('#cont-notas').textContent = resumo.documentos ? numero(resumo.documentos) : '';
     await carregarExecucoes();
+    await carregarEmpresas();
+    if (abaAtual === 'inicio') await carregarInicio(resumo);
     if (abaAtual === 'notas') await carregarNotas();
   } catch (e) {
     avisar(e.message, 'erro');
