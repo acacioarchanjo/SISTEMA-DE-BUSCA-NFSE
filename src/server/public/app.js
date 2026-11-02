@@ -917,6 +917,268 @@ $('#btn-encerrar').addEventListener('click', async () => {
 });
 
 // ---------------- Ciclo ----------------
+// ---------------- Apuração e encerramento do ISS ----------------
+const ETAPAS_APU = [['ABERTA', 'Apuração'], ['APROVADA', 'Aprovada'], ['ENCERRADA', 'Encerrada no portal'], ['GUIA_EMITIDA', 'Guia emitida'], ['PAGA', 'Paga']];
+const TIPO_GUIA = { ISS_PROPRIO: 'ISS próprio', ISS_RETIDO: 'ISS retido (tomador)' };
+const ROTULO_ETAPA = Object.fromEntries(ETAPAS_APU);
+const PILULA_ETAPA = { ABERTA: 'alerta', APROVADA: 'executando', ENCERRADA: 'executando', GUIA_EMITIDA: 'executando', PAGA: 'ok' };
+let apuAlvo = null; // { empresa, ibge, competencia }
+const nomeOperador = () => { try { return localStorage.getItem('operador') ?? ''; } catch { return ''; } };
+const lembrarOperador = (n) => { try { localStorage.setItem('operador', n); } catch { /* sem armazenamento */ } };
+const mesAnteriorIso = () => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7); };
+const brData = (iso) => (iso ? iso.slice(0, 10).split('-').reverse().join('/') : '—');
+const brMes = (m) => (m ? m.split('-').reverse().join('/') : '—');
+
+async function carregarApuracao() {
+  // selects
+  const selE = $('#apu-empresa');
+  const atualE = selE.value;
+  selE.innerHTML = '<option value="">Empresa…</option>' + empresas.map((e) => `<option value="${e.id}">${esc(e.razao_social)}</option>`).join('');
+  selE.value = atualE;
+  const municipios = await api('/api/municipios').catch(() => []);
+  const selM = $('#apu-ibge');
+  const atualM = selM.value || '3509502';
+  const lista = [...municipios];
+  if (!lista.some((m) => m.ibge === '3509502')) lista.unshift({ ibge: '3509502', nome: 'Campinas', uf: 'SP' });
+  selM.innerHTML = lista.map((m) => `<option value="${esc(m.ibge)}">${esc(m.nome)}${m.uf ? `/${esc(m.uf)}` : ''}</option>`).join('');
+  selM.value = atualM;
+  const f = $('#form-apu');
+  if (!f.competencia.value) f.competencia.value = mesAnteriorIso();
+
+  const v = await api('/api/apuracao/visao');
+  $('#apu-visao-cartao').classList.toggle('oculto', !v.linhas.length);
+  $('#apu-visao').innerHTML = v.linhas.map((l) => `<tr>
+      <td class="nome"><b>${esc(l.empresa)}</b><span class="sub">${esc(doc(l.cnpj))}</span></td>
+      <td>${esc(l.municipio)}</td>
+      <td>${brMes(l.competencia)}</td>
+      <td><span class="pilula ${PILULA_ETAPA[l.status]}">${esc(ROTULO_ETAPA[l.status])}</span>${l.desatualizada ? ' <span class="pilula erro">desatualizada</span>' : ''}${l.bloqueantes && l.status === 'ABERTA' ? ` <span class="pilula erro">${l.bloqueantes} pendência(s)</span>` : ''}</td>
+      <td class="num">${moeda(l.total)}</td>
+      <td class="sub-texto">${esc(l.proximo)}${l.vencimentos.length ? `<span class="sub">vence ${l.vencimentos.map(brData).join(', ')}</span>` : ''}</td>
+      <td><button class="botao secundario pequeno" data-apu-abrir="${l.empresa_id}|${l.ibge}|${l.competencia}">Abrir</button></td>
+    </tr>`).join('');
+  const pendentes = v.linhas.filter((l) => l.status !== 'PAGA' && (l.total > 0 || l.status !== 'ABERTA')).length;
+  $('#cont-apuracao').textContent = pendentes || '';
+  if (apuAlvo) await abrirApuracao(apuAlvo, { rolar: false });
+}
+
+async function abrirApuracao(alvo, { rolar = true } = {}) {
+  apuAlvo = alvo;
+  const e = await api(`/api/apuracao?${new URLSearchParams(alvo)}`);
+  renderApuracao(e);
+  if (rolar) $('#apu-detalhe').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function tabelaAliquotas(lista) {
+  if (!lista.length) return '<p class="sub-texto">Nenhuma nota.</p>';
+  return `<table><thead><tr><th>Alíquota</th><th class="num">Notas</th><th class="num">Base</th><th class="num">ISS</th></tr></thead><tbody>${
+    lista.map((a) => `<tr><td>${a.aliquota.toLocaleString('pt-BR')}%</td><td class="num">${numero(a.notas)}</td><td class="num">${moeda(a.base)}</td><td class="num">${moeda(a.iss)}</td></tr>`).join('')}</tbody></table>`;
+}
+
+function renderApuracao(e) {
+  const a = e.registro?.apuracao ?? e.atual; // depois de aprovada, mostra o que foi aprovado
+  const idx = ETAPAS_APU.findIndex(([k]) => k === e.status);
+  const etapas = `<ol class="etapas">${ETAPAS_APU.map(([k, t], i) => `<li class="${i < idx || e.status === 'PAGA' ? 'feita' : i === idx ? 'atual' : ''}"><span class="n">${i < idx || e.status === 'PAGA' ? '✓' : i + 1}</span>${t}</li>`).join('')}</ol>`;
+  const avisos = [];
+  if (e.desatualizada) avisos.push(`<div class="faixa-aviso erro"><b>Desatualizada:</b> notas da competência mudaram depois da aprovação (hoje o total seria ${moeda(e.atual.totalARecolher)}). Reabra e aprove de novo${['ENCERRADA', 'GUIA_EMITIDA', 'PAGA'].includes(e.status) ? '; como já foi encerrada no portal, provavelmente será preciso retificar lá' : ''}.</div>`);
+  avisos.push(`<div class="faixa-aviso"><b>Próximo passo:</b> ${esc(e.proximo)}</div>`);
+
+  const kpi = (t, v, s, cls = '') => `<div class="cartao kpi ${cls}"><div class="kpi-topo"><span class="kpi-icone">${icone('landmark')}</span>${t}</div><b>${moeda(v)}</b><small>${esc(s)}</small></div>`;
+  const kpis = `<div class="kpis kpis-3">${
+    kpi('ISS próprio a recolher', a.proprio.aRecolher, `${a.proprio.notas} nota(s) prestada(s) · ${a.proprio.regime}`) +
+    kpi('ISS retido a recolher', a.retido.aRecolher, `${a.retido.notas} nota(s) tomada(s) com retenção`) +
+    kpi('Total da competência', a.totalARecolher, `${brMes(a.competencia)} · ${a.municipio.nome}`)}</div>`;
+
+  const pend = e.atual.pendencias.length
+    ? e.atual.pendencias.map((p) => `<div class="pend"><b class="sev ${p.severidade}">${p.severidade}</b><span>${esc(p.mensagem)}${p.notas ? `<span class="sub">notas: ${esc(p.notas.slice(0, 15).join(', '))}${p.notas.length > 15 ? '…' : ''}</span>` : ''}</span></div>`).join('')
+    : '<p class="sub-texto">Nenhuma pendência.</p>';
+
+  const retidoPrest = a.retido.porPrestador.length
+    ? `<table><thead><tr><th>Prestador</th><th class="num">Notas</th><th class="num">Base</th><th class="num">ISS retido</th></tr></thead><tbody>${
+      a.retido.porPrestador.map((p) => `<tr><td class="nome"><b>${esc(p.prestador_nome ?? '—')}</b><span class="sub">${esc(doc(p.prestador_doc))}</span></td><td class="num">${numero(p.notas)}</td><td class="num">${moeda(p.base)}</td><td class="num">${moeda(p.iss)}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="sub-texto">Nenhuma nota tomada com ISS retido.</p>';
+
+  const fiscal = a.fiscal ?? e.atual.fiscal;
+  const info = fiscal ? `<div class="apu-bloco cartao"><h3>${esc(a.municipio.nome)}: como é feito</h3>
+      <p class="sub-texto">Guia: ${esc(fiscal.guia ?? '—')}</p>
+      <p class="sub-texto">${esc(fiscal.declaracaoTomador ?? '')}</p>
+      <p class="sub-texto">Encerramento e guia: ${fiscal.encerramentoPorWebservice ? 'por webservice' : 'no portal da prefeitura (sem webservice)'}.</p>
+      ${fiscal.portal ? `<a class="botao secundario" href="${esc(fiscal.portal)}" target="_blank" rel="noopener noreferrer">Abrir o portal da prefeitura</a>` : ''}</div>` : '';
+
+  $('#apu-detalhe').innerHTML = `
+    <section class="cartao apu-bloco">
+      <h3>${esc(a.empresa.razao_social)} · ${esc(a.municipio.nome)} · ${brMes(a.competencia)}</h3>
+      ${etapas}${avisos.join('')}
+    </section>
+    ${kpis}
+    <div class="apu-grade">
+      <div class="coluna-apu">
+        <section class="cartao apu-bloco"><h3>Pendências</h3>${pend}</section>
+        <section class="cartao apu-bloco"><h3>ISS próprio (notas prestadas)</h3>${tabelaAliquotas(a.proprio.porAliquota)}
+          <p class="sub-texto">Fora da conta: ${a.informativo.retidoPeloCliente.notas} prestada(s) com ISS retido pelo cliente (${moeda(a.informativo.retidoPeloCliente.iss)}), ${a.informativo.canceladas} cancelada(s)/substituída(s).</p></section>
+        <section class="cartao apu-bloco"><h3>ISS retido (notas tomadas)</h3>${retidoPrest}</section>
+      </div>
+      <div class="coluna-apu">
+        <section class="cartao apu-bloco" id="apu-acao">${acaoApuracao(e, a)}</section>
+        ${guiasRegistradas(e)}
+        ${info}
+        ${e.registro ? `<details class="cartao apu-bloco"><summary><b>Reabrir a competência</b></summary>
+          <form class="acao-apu" data-apu-form="reabrir">
+            <p class="sub-texto">Volta para a apuração. Tudo o que foi registrado fica na auditoria${['ENCERRADA', 'GUIA_EMITIDA', 'PAGA'].includes(e.status) ? '; se já encerrou no portal, a correção lá é uma retificação' : ''}.</p>
+            <label class="campo"><span>Motivo</span><input name="motivo" required minlength="10"></label>
+            <label class="campo"><span>Seu nome</span><input name="por" required value="${esc(nomeOperador())}"></label>
+            <button class="botao secundario perigo">Reabrir</button>
+          </form></details>` : ''}
+      </div>
+    </div>`;
+}
+
+function acaoApuracao(e, a) {
+  const por = esc(nomeOperador());
+  if (e.status === 'ABERTA') {
+    return `<h3>Aprovar a apuração</h3>
+      <form class="acao-apu" data-apu-form="aprovar">
+        <p class="sub-texto">Ao aprovar, os valores ficam congelados (com impressão digital SHA-256). Se uma nota chegar depois, o sistema avisa.</p>
+        ${e.atual.bloqueantes ? `<label class="campo"><span>Justificativa (há ${e.atual.bloqueantes} pendência(s) bloqueante(s))</span><textarea name="justificativa" rows="2" minlength="15" required></textarea></label>` : ''}
+        <label class="campo"><span>Seu nome</span><input name="por" required value="${por}"></label>
+        <label class="check"><input type="checkbox" name="confirmo" required> Conferi as notas e os valores de ${moeda(a.totalARecolher)}</label>
+        <button class="botao">Aprovar apuração</button>
+      </form>`;
+  }
+  if (e.status === 'APROVADA') {
+    return `<h3>Registrar o encerramento no portal</h3>
+      <form class="acao-apu" data-apu-form="encerramento">
+        <p class="sub-texto">Encerre (escriture) a competência no portal da prefeitura conferindo com os valores ao lado e registre aqui o protocolo/recibo.</p>
+        <div class="linha-2">
+          <label class="campo"><span>Protocolo / recibo</span><input name="protocolo" required></label>
+          <label class="campo"><span>Data do encerramento</span><input type="date" name="data" required value="${new Date().toISOString().slice(0, 10)}"></label>
+        </div>
+        <label class="campo"><span>Observação</span><input name="observacao"></label>
+        <label class="campo"><span>Seu nome</span><input name="por" required value="${por}"></label>
+        <button class="botao" ${e.desatualizada ? 'disabled' : ''}>Registrar encerramento</button>
+      </form>`;
+  }
+  if (e.status === 'ENCERRADA' && e.faltamGuias.length) {
+    return `<h3>Registrar a guia emitida no portal</h3>` + e.faltamGuias.map((g) => `
+      <form class="acao-apu" data-apu-form="guia">
+        <input type="hidden" name="tipo" value="${g.tipo}">
+        <h4>${TIPO_GUIA[g.tipo]} · apurado ${moeda(g.valor)}</h4>
+        <label class="campo"><span>Linha digitável ou código de barras</span><input name="linhaDigitavel" required autocomplete="off" spellcheck="false" data-esperado="${g.valor}" inputmode="numeric"></label>
+        <div class="validacao-boleto" data-validacao>Cole a linha da guia: o sistema confere os dígitos e o valor.</div>
+        <div class="linha-2">
+          <label class="campo"><span>Vencimento (se não vier no código)</span><input type="date" name="vencimento"></label>
+          <label class="campo"><span>PDF da guia (opcional)</span><input type="file" name="pdf" accept="application/pdf"></label>
+        </div>
+        <label class="campo oculto" data-just><span>Justificativa da diferença de valor</span><input name="justificativaDiferenca"></label>
+        <label class="campo"><span>Seu nome</span><input name="por" required value="${por}"></label>
+        <button class="botao" ${e.desatualizada ? 'disabled' : ''}>Registrar guia</button>
+      </form>`).join('<hr>');
+  }
+  if (['ENCERRADA', 'GUIA_EMITIDA'].includes(e.status)) return '<h3>Pagamento</h3><p class="sub-texto">Pague a guia no banco (o sistema nunca paga) e registre o pagamento no cartão da guia.</p>';
+  return `<h3>Competência concluída</h3><p class="sub-texto">Encerrada em ${brData(e.registro?.encerramento?.data)} (protocolo ${esc(e.registro?.encerramento?.protocolo ?? '—')}).</p>`;
+}
+
+function guiasRegistradas(e) {
+  const guias = e.registro?.guias ?? [];
+  if (!guias.length) return '';
+  const q = new URLSearchParams(apuAlvo);
+  const por = esc(nomeOperador());
+  return `<section class="cartao apu-bloco"><h3>Guias</h3>${guias.map((g) => `
+    <div class="guia-card">
+      <div><b>${TIPO_GUIA[g.tipo]}</b> · ${g.valorGuia !== null ? moeda(g.valorGuia) : 'valor de referência'} · vence ${brData(g.vencimento)}
+        ${g.pagamento ? `<span class="pilula ok">paga em ${brData(g.pagamento.data)}</span>` : g.emAtraso ? '<span class="pilula erro">vencida</span>' : '<span class="pilula alerta">a pagar</span>'}</div>
+      <code>${esc(g.linhaDigitavel)}</code>
+      ${g.diferenca ? `<span class="sub-texto">Diferença de ${moeda(g.diferenca)} sobre o apurado: ${esc(g.justificativaDiferenca)}</span>` : ''}
+      <div class="acoes">
+        <button class="botao secundario pequeno" data-copiar="${esc(g.linhaDigitavel.replace(/\D/g, ''))}">Copiar linha</button>
+        ${g.arquivo ? `<a class="botao secundario pequeno" href="/api/apuracao/arquivo?${q}&tipo=${g.tipo}&qual=guia">PDF da guia</a>` : ''}
+        ${g.pagamento?.comprovante ? `<a class="botao secundario pequeno" href="/api/apuracao/arquivo?${q}&tipo=${g.tipo}&qual=comprovante">Comprovante</a>` : ''}
+      </div>
+      ${!g.pagamento ? `<form class="acao-apu" data-apu-form="pagamento">
+        <input type="hidden" name="tipo" value="${g.tipo}">
+        <div class="linha-2">
+          <label class="campo"><span>Data do pagamento</span><input type="date" name="data" required></label>
+          <label class="campo"><span>Valor pago</span><input name="valorPago" inputmode="decimal" placeholder="${g.valorGuia ?? g.valorApurado}"></label>
+        </div>
+        <div class="linha-2">
+          <label class="campo"><span>Autenticação bancária</span><input name="autenticacao"></label>
+          <label class="campo"><span>Comprovante (PDF)</span><input type="file" name="pdf" accept="application/pdf"></label>
+        </div>
+        <label class="campo"><span>Seu nome</span><input name="por" required value="${por}"></label>
+        <button class="botao">Registrar pagamento</button>
+      </form>` : ''}
+    </div>`).join('')}</section>`;
+}
+
+$('#form-apu').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  abrirApuracao({ empresa: f.get('empresa'), ibge: f.get('ibge'), competencia: f.get('competencia') }).catch((e) => avisar(e.message, 'erro'));
+});
+$('#apu-visao').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-apu-abrir]');
+  if (!b) return;
+  const [empresa, ibge, competencia] = b.dataset.apuAbrir.split('|');
+  const f = $('#form-apu');
+  f.empresa.value = empresa; f.ibge.value = ibge; f.competencia.value = competencia;
+  abrirApuracao({ empresa, ibge, competencia }).catch((e) => avisar(e.message, 'erro'));
+});
+
+// validação ao vivo da linha digitável
+let timerBoleto;
+$('#apu-detalhe').addEventListener('input', (ev) => {
+  const inp = ev.target.closest('input[name=linhaDigitavel]');
+  if (!inp) return;
+  const form = inp.form;
+  const box = form.querySelector('[data-validacao]');
+  clearTimeout(timerBoleto);
+  timerBoleto = setTimeout(async () => {
+    const dig = inp.value.replace(/\D/g, '');
+    if (dig.length < 44) { box.className = 'validacao-boleto'; box.textContent = `${dig.length} dígito(s)…`; return; }
+    const r = await api(`/api/apuracao/boleto?linha=${dig}`);
+    if (!r.ok) { box.className = 'validacao-boleto erro'; box.textContent = `✗ ${r.erro}`; form.querySelector('[data-just]').classList.add('oculto'); return; }
+    const esperado = Number(inp.dataset.esperado);
+    const dif = r.valor === null ? 0 : Math.round((r.valor - esperado) * 100) / 100;
+    const tipo = r.tipo === 'arrecadacao' ? `arrecadação · ${r.segmentoNome}` : `boleto bancário · banco ${r.banco}`;
+    box.className = `validacao-boleto ${dif ? 'alerta' : 'ok'}`;
+    box.innerHTML = `✓ Dígitos conferem (${esc(tipo)}). Valor ${r.valor === null ? 'de referência' : moeda(r.valor)}${r.vencimento ? ` · vencimento ${brData(r.vencimento)}` : ''}` +
+      (dif ? ` · <b>difere do apurado em ${moeda(dif)}</b>` : ' · igual ao apurado');
+    if (r.vencimento) form.vencimento.value = r.vencimento;
+    form.querySelector('[data-just]').classList.toggle('oculto', !dif);
+  }, 250);
+});
+
+$('#apu-detalhe').addEventListener('click', async (ev) => {
+  const c = ev.target.closest('[data-copiar]');
+  if (!c) return;
+  ev.preventDefault();
+  try { await navigator.clipboard.writeText(c.dataset.copiar); avisar('Linha digitável copiada.'); } catch { avisar('Não foi possível copiar.', 'erro'); }
+});
+
+$('#apu-detalhe').addEventListener('submit', async (ev) => {
+  const form = ev.target.closest('[data-apu-form]');
+  if (!form) return;
+  ev.preventDefault();
+  const acao = form.dataset.apuForm;
+  const corpo = { ...apuAlvo };
+  for (const [k, v] of new FormData(form)) if (!(v instanceof File)) corpo[k] = v;
+  if (form.confirmo) corpo.confirmo = form.confirmo.checked;
+  const arq = form.pdf?.files?.[0];
+  const botao = form.querySelector('button:not([type=button])');
+  botao.disabled = true;
+  try {
+    if (arq) corpo.pdfBase64 = await arquivoParaBase64(arq);
+    if (corpo.por) lembrarOperador(corpo.por);
+    if (acao === 'pagamento' && corpo.valorPago) corpo.valorPago = Number(String(corpo.valorPago).replace(/\./g, '').replace(',', '.'));
+    const e = await api(`/api/apuracao/${acao}`, { metodo: 'POST', corpo });
+    renderApuracao(e);
+    avisar({ aprovar: 'Apuração aprovada.', encerramento: 'Encerramento registrado.', guia: 'Guia registrada e conferida.', pagamento: 'Pagamento registrado.', reabrir: 'Competência reaberta.' }[acao]);
+    carregarApuracao().catch(() => {});
+  } catch (e) {
+    avisar(e.message, 'erro');
+    botao.disabled = false;
+  }
+});
+
 // ---------------- Google Drive (pasta espelho) ----------------
 let driveTimer = null;
 function statusDrive(p) {
@@ -994,6 +1256,7 @@ async function atualizar() {
     if (abaAtual === 'conferencia') await carregarConferencia();
     if (abaAtual === 'execucoes') await carregarAuditoria();
     if (abaAtual === 'retencoes') await carregarRetencoes();
+    if (abaAtual === 'apuracao') await carregarApuracao();
   } catch (e) {
     avisar(e.message, 'erro');
   }

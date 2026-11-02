@@ -27,6 +27,7 @@
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20zM12 10v4M12 17h.01"/></symbol>
     <symbol id="i-percent" viewBox="0 0 24 24"><path d="M19 5 5 19"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></symbol>
     <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 9.5a4.25 4.25 0 0 1-.5 8.5z"/></symbol>
+    <symbol id="i-landmark" viewBox="0 0 24 24"><path d="M3 21h18M5 21V10M19 21V10M9 21V10M15 21V10M2 10l10-6 10 6z"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></symbol>
     <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
     <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
@@ -49,6 +50,7 @@
         <button data-aba="notas"><svg><use href="#i-file"/></svg><span>Notas</span><em id="cont-notas"></em></button>
         <button data-aba="conferencia"><svg><use href="#i-shield"/></svg><span>Conferência</span><em id="cont-conferencia" class="perigo"></em></button>
         <button data-aba="retencoes"><svg><use href="#i-percent"/></svg><span>Retenções</span></button>
+        <button data-aba="apuracao"><svg><use href="#i-landmark"/></svg><span>Apuração ISS</span><em id="cont-apuracao" class="perigo"></em></button>
         <button data-aba="execucoes"><svg><use href="#i-activity"/></svg><span>Execuções</span><i id="indicador-exec" class="pulso oculto"></i></button>
       </nav>
       <div class="lateral-rodape">
@@ -251,6 +253,29 @@
             <tbody id="lista-reinf"></tbody>
           </table>
         </div>
+      </main>
+
+      <!-- APURAÇÃO E ENCERRAMENTO DO ISS -->
+      <main id="aba-apuracao" class="aba oculto">
+        <header class="cabecalho">
+          <div>
+            <h1>Apuração e encerramento do ISS</h1>
+            <p>Calcula o ISS do mês, acompanha o encerramento no portal e confere a guia pelo código de barras. As decisões são suas: o sistema não encerra, não emite e não paga.</p>
+          </div>
+        </header>
+        <section class="cartao tabela-wrap" id="apu-visao-cartao">
+          <table>
+            <thead><tr><th>Empresa</th><th>Município</th><th>Competência</th><th>Etapa</th><th class="num">A recolher</th><th>Próximo passo</th><th></th></tr></thead>
+            <tbody id="apu-visao"></tbody>
+          </table>
+        </section>
+        <form id="form-apu" class="cartao filtros">
+          <select name="empresa" id="apu-empresa" required><option value="">Empresa…</option></select>
+          <select name="ibge" id="apu-ibge" required><option value="3509502">Campinas/SP</option></select>
+          <label class="campo-data"><span>Competência</span><input type="month" name="competencia" required></label>
+          <button type="submit" class="botao">Apurar</button>
+        </form>
+        <div id="apu-detalhe"></div>
       </main>
 
       <!-- EXECUÇÕES -->
