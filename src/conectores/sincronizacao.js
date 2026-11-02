@@ -11,7 +11,7 @@ import { registrarAuditoria } from '../auditoria.js';
 import { validarDocumentos } from '../fiscal/validacao.js';
 import { REGRAS_VERSAO } from '../fiscal/regras.js';
 import { criarConectorMunicipal } from './registro.js';
-import { METODO } from './contrato.js';
+import { METODO, ErroConector } from './contrato.js';
 
 const DIA = 86_400_000;
 const isoDia = (d) => d.toISOString().slice(0, 10);
@@ -63,7 +63,7 @@ export async function sincronizarMunicipal(repo, vinculoId, opcoes = {}) {
   const periodo = { ...periodoPadrao(vinculo), ...(opcoes.de ? { de: opcoes.de } : {}), ...(opcoes.ate ? { ate: opcoes.ate } : {}) };
   const execId = repo.iniciarExecucao(empresa.id, 'busca_municipal', { loteId });
   const inicio = Date.now();
-  const estado = { execucaoId: execId, novos: 0, atualizados: 0, eventos: 0, erros: [], porPapel: {}, requisicoes: 0, falhasTransitorias: [] };
+  const estado = { execucaoId: execId, novos: 0, atualizados: 0, eventos: 0, erros: [], porPapel: {}, requisicoes: 0, falhasTransitorias: [], falhasPapel: [] };
   const base = {
     vinculo_id: vinculo.id,
     municipio: { ibge: municipio.ibge, nome: municipio.nome, uf: municipio.uf },
@@ -98,6 +98,7 @@ export async function sincronizarMunicipal(repo, vinculoId, opcoes = {}) {
       }
       const c = { notas: 0, novas: 0 };
       const vistas = new Set(); // a mesma nota pode voltar em janelas sobrepostas
+      try {
       for await (const item of conector.listarNotas({ papel, ...periodo })) {
         if (item.erro) {
           estado.erros.push(`${papel}, ${item.janela.de}..${item.janela.ate} p.${item.pagina}: ${item.erro}`);
@@ -116,8 +117,17 @@ export async function sincronizarMunicipal(repo, vinculoId, opcoes = {}) {
           estado.erros.push(`${papel} nº ${item.nota?.numero ?? '?'}: ${e.message}`);
         }
       }
+      } catch (e) {
+        if (!(e instanceof ErroConector)) throw e;
+        // guarda o que já veio e segue para o outro papel; se nenhum papel funcionar, o erro sobe
+        c.erro = e.message;
+        estado.falhasPapel.push({ papel, erro: e });
+      }
       estado.porPapel[papel] = c;
     }
+    const papeisApi = Object.values(estado.porPapel).filter((v) => typeof v === 'object');
+    if (estado.falhasPapel.length && papeisApi.every((v) => v.erro)) throw estado.falhasPapel[0].erro;
+    for (const f of estado.falhasPapel) estado.erros.push(`${f.papel}: ${f.erro.message}`);
     estado.requisicoes = conector.requisicoes ?? 0;
     estado.falhasTransitorias = conector.falhasTransitorias ?? [];
     if (conector.assinaturaDetectada) lembrarAssinatura(repo, municipio, conector.algoritmo);
@@ -128,12 +138,13 @@ export async function sincronizarMunicipal(repo, vinculoId, opcoes = {}) {
     } catch (e) {
       estado.erros.push(`validação fiscal: ${e.message}`);
     }
-    repo.avancarVinculo(vinculo.id, periodo.ate > hojeIso() ? hojeIso() : periodo.ate);
+    // se um papel falhou, não avança: a próxima busca repete o período (notas já gravadas não duplicam)
+    if (!estado.falhasPapel.length) repo.avancarVinculo(vinculo.id, periodo.ate > hojeIso() ? hojeIso() : periodo.ate);
 
     const { codigo, subcodigo } = classificarSucesso({ novos: estado.novos, eventos: 0, erros: estado.erros });
     const div = validacao?.abertas;
     const papeis = Object.entries(estado.porPapel)
-      .map(([p, v]) => (typeof v === 'object' ? `${v.notas} ${p} (${v.novas} nova(s))` : `${p}: não disponível neste município`))
+      .map(([p, v]) => (typeof v !== 'object' ? `${p}: não disponível neste município` : v.erro ? `${p}: falhou (${v.notas} recebida(s) antes do erro)` : `${v.notas} ${p} (${v.novas} nova(s))`))
       .join(', ');
     const msg = `${municipio.nome}: ${papeis}. Período ${periodo.de.split('-').reverse().join('/')} a ${periodo.ate.split('-').reverse().join('/')}.` +
       (div && (div.BLOQUEANTE || div.ALERTA) ? ` Conferência: ${div.BLOQUEANTE} bloqueante(s), ${div.ALERTA} alerta(s).` : '') +
