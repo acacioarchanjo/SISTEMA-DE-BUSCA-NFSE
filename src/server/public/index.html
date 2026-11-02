@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Buscador NFS-e</title>
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+  <header class="topo">
+    <div class="marca">🔎 <strong>Buscador NFS-e</strong> <span id="ambiente" class="tag"></span></div>
+    <nav class="abas">
+      <button data-aba="empresas" class="ativa">Empresas</button>
+      <button data-aba="notas">Notas</button>
+      <button data-aba="execucoes">Execuções</button>
+    </nav>
+  </header>
+
+  <section class="resumo" id="resumo"></section>
+  <div id="aviso" class="aviso oculto"></div>
+
+  <!-- EMPRESAS -->
+  <main id="aba-empresas" class="aba">
+    <div class="barra">
+      <h2>Empresas</h2>
+      <div class="acoes">
+        <button id="btn-buscar-todas" class="secundario">▶ Buscar todas</button>
+        <button id="btn-nova-empresa">+ Nova empresa</button>
+      </div>
+    </div>
+    <div class="tabela-wrap">
+      <table>
+        <thead><tr>
+          <th>Empresa</th><th>CNPJ</th><th>Certificado</th><th>Último NSU</th><th>Notas</th><th>Última busca</th><th></th>
+        </tr></thead>
+        <tbody id="lista-empresas"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- NOTAS -->
+  <main id="aba-notas" class="aba oculto">
+    <div class="barra">
+      <h2>Notas</h2>
+      <div class="acoes">
+        <button id="btn-csv" class="secundario">⬇ Planilha CSV</button>
+        <button id="btn-zip" class="secundario">⬇ ZIP de XMLs</button>
+        <label class="check"><input type="checkbox" id="zip-pdf"> incluir PDFs</label>
+      </div>
+    </div>
+    <form id="filtros" class="filtros">
+      <select name="empresa" id="filtro-empresa"><option value="">Todas as empresas</option></select>
+      <select name="papel">
+        <option value="">Emitidas e recebidas</option>
+        <option value="emitida">Emitidas</option>
+        <option value="recebida">Recebidas</option>
+        <option value="intermediario">Intermediário</option>
+      </select>
+      <select name="situacao">
+        <option value="">Qualquer situação</option>
+        <option value="normal">Normais</option>
+        <option value="cancelada">Canceladas</option>
+        <option value="substituida">Substituídas</option>
+      </select>
+      <label>Competência de <input type="date" name="de"></label>
+      <label>até <input type="date" name="ate"></label>
+      <input type="search" name="busca" placeholder="Número, chave, nome, CNPJ…">
+      <button type="submit">Filtrar</button>
+    </form>
+    <div id="totais" class="totais"></div>
+    <div class="tabela-wrap">
+      <table>
+        <thead><tr>
+          <th>Competência</th><th>Nº</th><th>Papel</th><th>Prestador</th><th>Tomador</th>
+          <th class="num">Valor</th><th class="num">ISS</th><th class="num">Retenções</th><th class="num">Líquido</th><th>Situação</th><th></th>
+        </tr></thead>
+        <tbody id="lista-notas"></tbody>
+      </table>
+    </div>
+    <div class="paginacao">
+      <button id="pag-ant" class="secundario">◀ Anterior</button>
+      <span id="pag-info"></span>
+      <button id="pag-prox" class="secundario">Próxima ▶</button>
+    </div>
+  </main>
+
+  <!-- EXECUÇÕES -->
+  <main id="aba-execucoes" class="aba oculto">
+    <div class="barra"><h2>Execuções</h2></div>
+    <div class="tabela-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Empresa</th><th>Tipo</th><th>Status</th><th>Início</th><th>Fim</th><th>Lotes</th><th>Novas</th><th>Mensagem</th></tr></thead>
+        <tbody id="lista-execucoes"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- Diálogo: nova empresa -->
+  <dialog id="dlg-empresa">
+    <form id="form-empresa" method="dialog">
+      <h3>Nova empresa</h3>
+      <p class="dica">O certificado A1 é cifrado (AES-256-GCM) e fica apenas neste computador.</p>
+      <label>Certificado A1 (.pfx / .p12) <input type="file" name="pfx" accept=".pfx,.p12" required></label>
+      <label>Senha do certificado <input type="password" name="senha" autocomplete="off"></label>
+      <label>CNPJ (opcional — lido do certificado) <input name="cnpj" inputmode="numeric" placeholder="00.000.000/0000-00"></label>
+      <label>Razão social (opcional) <input name="razaoSocial"></label>
+      <div class="erro" id="erro-empresa"></div>
+      <menu>
+        <button type="button" class="secundario" data-fechar>Cancelar</button>
+        <button type="submit">Salvar</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <!-- Diálogo: conciliação -->
+  <dialog id="dlg-conciliar">
+    <form id="form-conciliar" method="dialog">
+      <h3>Conciliar com o portal <span class="tag">experimental</span></h3>
+      <p class="dica">Entra no Emissor Nacional com o certificado, lista as notas do período e baixa as que não vieram pelo ADN.</p>
+      <label>De <input type="date" name="de" required></label>
+      <label>Até <input type="date" name="ate" required></label>
+      <menu>
+        <button type="button" class="secundario" data-fechar>Cancelar</button>
+        <button type="submit">Conciliar</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <!-- Diálogo: detalhes da nota -->
+  <dialog id="dlg-nota">
+    <div id="detalhe-nota"></div>
+    <menu><button type="button" data-fechar>Fechar</button></menu>
+  </dialog>
+
+  <input type="file" id="arquivo-importar" accept=".xml" multiple class="oculto">
+
+  <footer>Uso educacional · dados armazenados localmente · <a href="https://www.nfse.gov.br" target="_blank" rel="noopener">nfse.gov.br</a></footer>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,277 @@
+// Painel web local — servidor HTTP em Node puro (sem framework).
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { config } from '../config.js';
+import { cadastrarEmpresa } from '../crypto/credenciais.js';
+import { sincronizarEmpresa, importarXml } from '../adn/distribuicao.js';
+import { conciliarEmpresa } from '../portal/conciliacao.js';
+import { lerXmlSalvo, excluirXmlsDaEmpresa } from '../nfse/armazenamento.js';
+import { gerarZip } from '../exportador/zip.js';
+import { gerarCsv } from '../exportador/planilha.js';
+import { gerarDanfse } from '../exportador/danfse.js';
+import { diasParaVencer, ErroCertificado } from '../crypto/certificado.js';
+import { ErroCofre } from '../crypto/cofre.js';
+import { ErroParser } from '../nfse/parser.js';
+
+const PUBLICO = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
+const LIMITE_CORPO = 15 * 1024 * 1024;
+
+class ErroHttp extends Error {
+  constructor(status, msg) {
+    super(msg);
+    this.status = status;
+  }
+}
+
+function json(res, status, dados) {
+  const corpo = JSON.stringify(dados);
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(corpo);
+}
+
+function arquivo(res, buffer, tipo, nome) {
+  res.writeHead(200, {
+    'Content-Type': tipo,
+    'Content-Length': buffer.length,
+    'Content-Disposition': `attachment; filename="${nome}"`,
+    'Cache-Control': 'no-store',
+  });
+  res.end(buffer);
+}
+
+function lerCorpo(req) {
+  return new Promise((resolve, reject) => {
+    const partes = [];
+    let tam = 0;
+    req.on('data', (c) => {
+      tam += c.length;
+      if (tam > LIMITE_CORPO) {
+        reject(new ErroHttp(413, 'Requisição grande demais.'));
+        req.destroy();
+      } else partes.push(c);
+    });
+    req.on('end', () => {
+      if (!tam) return resolve({});
+      try {
+        resolve(JSON.parse(Buffer.concat(partes).toString('utf8')));
+      } catch {
+        reject(new ErroHttp(400, 'JSON inválido.'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+const filtrosDe = (q) => ({
+  empresaId: q.get('empresa') || undefined,
+  papel: q.get('papel') || undefined,
+  situacao: q.get('situacao') || undefined,
+  de: q.get('de') || undefined,
+  ate: q.get('ate') || undefined,
+  busca: q.get('busca') || undefined,
+});
+
+const hoje = () => new Date().toISOString().slice(0, 10);
+
+/**
+ * Cria o servidor. `opcoes` permite injetar dependências nos testes.
+ */
+export function criarServidor(repo, opcoes = {}) {
+  const sincronizar = opcoes.sincronizar ?? sincronizarEmpresa;
+  const conciliar = opcoes.conciliar ?? conciliarEmpresa;
+  const dataDir = opcoes.dataDir ?? config.dataDir;
+  const hostsPermitidos = new Set(['localhost', '127.0.0.1', '[::1]', config.servidor.host]);
+
+  const emSegundoPlano = (fn) => {
+    Promise.resolve()
+      .then(fn)
+      .catch((e) => console.error('[tarefa]', e.message));
+  };
+
+  const empresaOu404 = (id) => {
+    const e = repo.obterEmpresa(Number(id));
+    if (!e) throw new ErroHttp(404, 'Empresa não encontrada.');
+    return e;
+  };
+  const docOu404 = (id) => {
+    const d = repo.obterDocumento(Number(id));
+    if (!d) throw new ErroHttp(404, 'Documento não encontrado.');
+    return d;
+  };
+
+  // [método, regex, handler(req, res, params, query)]
+  const rotas = [
+    ['GET', /^\/api\/resumo$/, (req, res) => json(res, 200, { ...repo.resumo(), ambiente: config.ambiente })],
+
+    ['GET', /^\/api\/empresas$/, (req, res) =>
+      json(res, 200, repo.listarEmpresas().map((e) => ({ ...e, dias_para_vencer: e.cert_valido_ate ? diasParaVencer(e.cert_valido_ate) : null })))],
+
+    ['POST', /^\/api\/empresas$/, async (req, res) => {
+      const b = await lerCorpo(req);
+      if (!b.pfxBase64) throw new ErroHttp(400, 'Envie o certificado .pfx.');
+      const r = cadastrarEmpresa(repo, {
+        pfx: Buffer.from(b.pfxBase64, 'base64'),
+        senha: b.senha ?? '',
+        cnpj: b.cnpj,
+        razaoSocial: b.razaoSocial,
+      });
+      json(res, 201, { ...r, empresa: repo.obterEmpresa(r.id) });
+    }],
+
+    ['PATCH', /^\/api\/empresas\/(\d+)$/, async (req, res, [id]) => {
+      empresaOu404(id);
+      const b = await lerCorpo(req);
+      repo.atualizarEmpresa(Number(id), { razao_social: b.razao_social, ativo: b.ativo });
+      json(res, 200, repo.obterEmpresa(Number(id)));
+    }],
+
+    ['DELETE', /^\/api\/empresas\/(\d+)$/, (req, res, [id], q) => {
+      const e = empresaOu404(id);
+      repo.excluirEmpresa(e.id);
+      if (q.get('apagarXml') === '1') excluirXmlsDaEmpresa(e.cnpj, dataDir);
+      json(res, 200, { ok: true });
+    }],
+
+    ['POST', /^\/api\/empresas\/(\d+)\/buscar$/, (req, res, [id]) => {
+      const e = empresaOu404(id);
+      if (repo.execucaoEmAndamento(e.id)) throw new ErroHttp(409, 'Já existe uma busca em andamento para esta empresa.');
+      if (e.trava_ate && new Date(e.trava_ate) > new Date())
+        throw new ErroHttp(429, `Empresa travada até ${new Date(e.trava_ate).toLocaleString('pt-BR')} (consumo indevido).`);
+      emSegundoPlano(() => sincronizar(repo, e.id));
+      json(res, 202, { ok: true, mensagem: 'Busca iniciada.' });
+    }],
+
+    ['POST', /^\/api\/buscar-todas$/, (req, res) => {
+      const empresas = repo.listarEmpresas({ somenteAtivas: true });
+      emSegundoPlano(async () => {
+        for (const e of empresas) {
+          try {
+            await sincronizar(repo, e.id);
+          } catch (err) {
+            console.error(`[busca] ${e.razao_social}: ${err.message}`);
+          }
+        }
+      });
+      json(res, 202, { ok: true, mensagem: `Busca iniciada para ${empresas.length} empresa(s).` });
+    }],
+
+    ['POST', /^\/api\/empresas\/(\d+)\/conciliar$/, async (req, res, [id]) => {
+      const e = empresaOu404(id);
+      const b = await lerCorpo(req);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(b.de ?? '') || !/^\d{4}-\d{2}-\d{2}$/.test(b.ate ?? ''))
+        throw new ErroHttp(400, 'Informe o período (de/ate) no formato AAAA-MM-DD.');
+      emSegundoPlano(() => conciliar(repo, e.id, { de: b.de, ate: b.ate }));
+      json(res, 202, { ok: true, mensagem: 'Conciliação iniciada.' });
+    }],
+
+    ['POST', /^\/api\/empresas\/(\d+)\/destravar$/, (req, res, [id]) => {
+      empresaOu404(id);
+      repo.definirTrava(Number(id), null);
+      json(res, 200, { ok: true });
+    }],
+
+    ['POST', /^\/api\/empresas\/(\d+)\/cursor$/, async (req, res, [id]) => {
+      empresaOu404(id);
+      const b = await lerCorpo(req);
+      const nsu = Number(b.nsu);
+      if (!Number.isInteger(nsu) || nsu < 0) throw new ErroHttp(400, 'NSU inválido.');
+      repo.salvarCursor(Number(id), nsu, { forcar: true });
+      json(res, 200, repo.obterEmpresa(Number(id)));
+    }],
+
+    ['POST', /^\/api\/empresas\/(\d+)\/importar$/, async (req, res, [id]) => {
+      const e = empresaOu404(id);
+      const b = await lerCorpo(req);
+      const arquivos = Array.isArray(b.arquivos) ? b.arquivos : [];
+      let novos = 0;
+      const erros = [];
+      for (const a of arquivos) {
+        try {
+          if (importarXml(repo, e, Buffer.from(a.conteudoBase64 ?? '', 'base64').toString('utf8'), dataDir) === 'nova') novos++;
+        } catch (err) {
+          erros.push(`${a.nome ?? 'arquivo'}: ${err.message}`);
+        }
+      }
+      json(res, 200, { novos, total: arquivos.length, erros });
+    }],
+
+    ['GET', /^\/api\/execucoes$/, (req, res, _, q) =>
+      json(res, 200, repo.listarExecucoes({ empresaId: q.get('empresa'), limite: q.get('limite') ?? 30 }))],
+
+    ['GET', /^\/api\/documentos$/, (req, res, _, q) =>
+      json(res, 200, repo.listarDocumentos({ ...filtrosDe(q), limite: q.get('limite') ?? 100, offset: q.get('offset') ?? 0 }))],
+
+    ['GET', /^\/api\/documentos\/(\d+)$/, (req, res, [id]) => {
+      const d = docOu404(id);
+      json(res, 200, { ...d, eventos: repo.listarEventos(d.empresa_id, d.chave) });
+    }],
+
+    ['GET', /^\/api\/documentos\/(\d+)\/xml$/, (req, res, [id]) => {
+      const d = docOu404(id);
+      if (!d.xml_path) throw new ErroHttp(404, 'XML não disponível.');
+      arquivo(res, Buffer.from(lerXmlSalvo(d.xml_path, dataDir), 'utf8'), 'application/xml; charset=utf-8', `${d.chave}.xml`);
+    }],
+
+    ['GET', /^\/api\/documentos\/(\d+)\/pdf$/, async (req, res, [id]) => {
+      const d = docOu404(id);
+      arquivo(res, await gerarDanfse(d), 'application/pdf', `NFSe-${d.numero ?? d.chave}.pdf`);
+    }],
+
+    ['GET', /^\/api\/exportar\/csv$/, (req, res, _, q) => {
+      const { itens } = repo.listarDocumentos({ ...filtrosDe(q), limite: 100_000 });
+      arquivo(res, Buffer.from(gerarCsv(itens), 'utf8'), 'text/csv; charset=utf-8', `nfse-${hoje()}.csv`);
+    }],
+
+    ['GET', /^\/api\/exportar\/zip$/, async (req, res, _, q) => {
+      const { itens } = repo.listarDocumentos({ ...filtrosDe(q), limite: 100_000 });
+      if (!itens.length) throw new ErroHttp(404, 'Nenhum documento para os filtros escolhidos.');
+      const buf = await gerarZip(itens, { incluirPdf: q.get('pdf') === '1', dataDir });
+      arquivo(res, buf, 'application/zip', `nfse-${hoje()}.zip`);
+    }],
+  ];
+
+  async function tratar(req, res) {
+    // Proteção contra DNS rebinding: só aceita Host local.
+    const host = String(req.headers.host ?? '').replace(/:\d+$/, '');
+    if (!hostsPermitidos.has(host)) throw new ErroHttp(403, 'Host não permitido.');
+
+    const url = new URL(req.url, 'http://localhost');
+    const metodo = req.method.toUpperCase();
+
+    if (url.pathname.startsWith('/api/')) {
+      // CSRF: requisições que alteram estado precisam do cabeçalho customizado
+      // (um site externo não consegue enviá-lo sem preflight CORS, que não é liberado).
+      if (metodo !== 'GET' && req.headers['x-buscador'] !== '1') throw new ErroHttp(403, 'Requisição bloqueada (CSRF).');
+      for (const [m, rx, handler] of rotas) {
+        if (m !== metodo) continue;
+        const casou = url.pathname.match(rx);
+        if (casou) return handler(req, res, casou.slice(1), url.searchParams);
+      }
+      throw new ErroHttp(404, 'Rota não encontrada.');
+    }
+
+    if (metodo !== 'GET') throw new ErroHttp(405, 'Método não permitido.');
+    const nome = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
+    const abs = path.resolve(PUBLICO, nome);
+    if (!abs.startsWith(PUBLICO + path.sep) || !fs.existsSync(abs)) throw new ErroHttp(404, 'Não encontrado.');
+    res.writeHead(200, {
+      'Content-Type': MIME[path.extname(abs)] ?? 'application/octet-stream',
+      'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self'",
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+    });
+    fs.createReadStream(abs).pipe(res);
+  }
+
+  return http.createServer((req, res) => {
+    tratar(req, res).catch((e) => {
+      const status = e.status ?? (e instanceof ErroCertificado || e instanceof ErroCofre || e instanceof ErroParser ? 400 : 500);
+      if (status >= 500) console.error(e);
+      if (!res.headersSent) json(res, status, { erro: e.message });
+      else res.end();
+    });
+  });
+}
