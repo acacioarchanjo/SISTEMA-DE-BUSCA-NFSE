@@ -82,6 +82,16 @@ do próprio certificado). Depois clique em **▶ Buscar** pra baixar as NFS-e. A
 
 > 🔑 **Guarde a `NFSE_MASTER_KEY`.** Sem ela não dá pra decifrar os certificados salvos; seria preciso cadastrá-los de novo.
 
+### Windows: duplo clique
+
+Depois de instalar o Node.js 22 LTS, dê **duplo clique em `iniciar.bat`**. Ele:
+1. confere se o Node está instalado (versão 20 ou mais nova);
+2. roda `npm install` na primeira vez;
+3. cria o `.env` e gera a `NFSE_MASTER_KEY` automaticamente (**faça backup do `.env`**);
+4. abre o navegador no painel e sobe o sistema.
+
+Para encerrar, feche a janela preta ou aperte `Ctrl+C`.
+
 ### Linha de comando
 
 ```bash
