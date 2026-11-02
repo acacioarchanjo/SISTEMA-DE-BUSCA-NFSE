@@ -100,6 +100,13 @@ export async function sincronizarMunicipal(repo, vinculoId, opcoes = {}) {
       const vistas = new Set(); // a mesma nota pode voltar em janelas sobrepostas
       try {
       for await (const item of conector.listarNotas({ papel, ...periodo })) {
+        if (item.falhaJanela) {
+          // dia em que a prefeitura falha mesmo isolado: registra, não avança o período e segue
+          estado.falhasPapel.push({ papel, erro: item.erro });
+          c.diasComFalha = (c.diasComFalha ?? 0) + 1;
+          c.erro = item.erro.message;
+          continue;
+        }
         if (item.erro) {
           estado.erros.push(`${papel}, ${item.janela.de}..${item.janela.ate} p.${item.pagina}: ${item.erro}`);
           continue;
@@ -127,10 +134,11 @@ export async function sincronizarMunicipal(repo, vinculoId, opcoes = {}) {
       estado.porPapel[papel] = c;
     }
     const papeisApi = Object.values(estado.porPapel).filter((v) => typeof v === 'object');
-    if (estado.falhasPapel.length && papeisApi.every((v) => v.erro)) throw estado.falhasPapel[0].erro;
+    if (estado.falhasPapel.length && papeisApi.every((v) => v.erro && !v.notas && !v.diasComFalha)) throw estado.falhasPapel[0].erro;
     for (const f of estado.falhasPapel) estado.erros.push(`${f.papel}: ${f.erro.message}`);
     estado.requisicoes = conector.requisicoes ?? 0;
     estado.falhasTransitorias = conector.falhasTransitorias ?? [];
+    estado.janelasDivididas = conector.janelasDivididas ?? [];
     if (conector.assinaturaDetectada) lembrarAssinatura(repo, municipio, conector.algoritmo);
 
     let validacao = null;
@@ -145,14 +153,14 @@ export async function sincronizarMunicipal(repo, vinculoId, opcoes = {}) {
     const { codigo, subcodigo } = classificarSucesso({ novos: estado.novos, eventos: 0, erros: estado.erros });
     const div = validacao?.abertas;
     const papeis = Object.entries(estado.porPapel)
-      .map(([p, v]) => (typeof v !== 'object' ? `${p}: não disponível neste município` : v.erro ? `${p}: falhou (${v.notas} recebida(s) antes do erro)` : `${v.notas} ${p} (${v.novas} nova(s))`))
+      .map(([p, v]) => (typeof v !== 'object' ? `${p}: não disponível neste município` : v.erro ? `${p}: ${v.diasComFalha ? `${v.notas} recebida(s) (${v.novas} nova(s)), ${v.diasComFalha} dia(s) com erro da prefeitura` : `falhou (${v.notas} recebida(s) antes do erro)`}` : `${v.notas} ${p} (${v.novas} nova(s))`))
       .join(', ');
     const msg = `${municipio.nome}: ${papeis}. Período ${periodo.de.split('-').reverse().join('/')} a ${periodo.ate.split('-').reverse().join('/')}.` +
       (div && (div.BLOQUEANTE || div.ALERTA) ? ` Conferência: ${div.BLOQUEANTE} bloqueante(s), ${div.ALERTA} alerta(s).` : '') +
       (estado.erros.length ? ` ${estado.erros.length} item(ns) com erro: ${estado.erros.slice(0, 3).join(' | ')}` : '');
     repo.atualizarExecucao(execId, {
       status: statusLegado(codigo), codigo, subcodigo, mensagem: msg, finalizar: true, novos: estado.novos, lotes: estado.requisicoes,
-      detalhes: { ...base, por_papel: estado.porPapel, requisicoes: estado.requisicoes, documentos_com_erro: estado.erros, falhas_transitorias: estado.falhasTransitorias, validacao },
+      detalhes: { ...base, por_papel: estado.porPapel, janelas_divididas: estado.janelasDivididas, requisicoes: estado.requisicoes, documentos_com_erro: estado.erros, falhas_transitorias: estado.falhasTransitorias, validacao },
     });
     auditar(codigo, subcodigo, msg, validacao);
     return { ...estado, codigo, subcodigo, mensagem: msg, validacao, status: statusLegado(codigo) };

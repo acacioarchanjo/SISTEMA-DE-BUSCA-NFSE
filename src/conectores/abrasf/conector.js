@@ -44,6 +44,7 @@ export class ConectorAbrasf {
     this.assinar = !!this.opcoes.assinarConsulta;
     this.algoritmo = this.opcoes.algoritmoAssinatura || 'sha1';
     this.assinaturaDetectada = false; // vira true se a prefeitura recusar consulta sem assinatura
+    this.janelasDivididas = []; // janelas com erro do servidor que foram divididas ao meio
     this.sucessos = 0; // depois que uma consulta passa, a assinatura/algoritmo já estão certos
 
     let url;
@@ -160,7 +161,10 @@ export class ConectorAbrasf {
     if (!this.perfil.operacoes[papel]) {
       throw new ErroConector('ERRO_CONFIGURACAO', 'OPERACAO_NAO_SUPORTADA', `${this.perfil.nome} não permite consultar notas ${papel} pelo ${papel === 'tomadas' ? 'tomador' : 'prestador'}.`);
     }
-    for (const j of janelas(de, ate, Number(this.opcoes.janelaDias) || 30)) {
+    const br = (d) => d.split('-').reverse().join('/');
+    const fila = janelas(de, ate, Number(this.opcoes.janelaDias) || 30);
+    while (fila.length) {
+      const j = fila.shift();
       let pagina = 1;
       while (pagina <= this.opcoes.maxPaginas) {
         const envio = montarEnvio(this.perfil, papel, { cnpj: this.cred.cnpj, im: this.im, de: j.de, ate: j.ate, pagina, periodo: this.opcoes.periodo, namespace: this.opcoes.namespaceDados });
@@ -168,13 +172,25 @@ export class ConectorAbrasf {
         try {
           r = await this.#chamar(papel, envio);
         } catch (e) {
-          const br = (d) => d.split('-').reverse().join('/');
-          if (e instanceof ErroConector && !e.janela) {
+          if (!(e instanceof ErroConector)) throw e;
+          if (!e.janela) {
             e.papel = papel;
             e.janela = j;
             e.message = `${e.message} [notas ${papel}, ${br(j.de)} a ${br(j.ate)}${pagina > 1 ? `, página ${pagina}` : ''}]`;
           }
-          throw e;
+          // Erro do servidor da prefeitura numa janela, com outras consultas já aceitas: divide a janela ao meio
+          // até isolar o(s) dia(s) problemático(s) e segue com o resto do período.
+          const erroServidor = e.codigo === 'PORTAL_INDISPONIVEL' && e.subcodigo === 'SERVIDOR_FORA' && this.sucessos > 0;
+          if (!erroServidor) throw e;
+          const dias = janelas(j.de, j.ate, 1);
+          if (dias.length > 1) {
+            const meio = Math.ceil(dias.length / 2);
+            fila.unshift({ de: dias[0].de, ate: dias[meio - 1].ate }, { de: dias[meio].de, ate: dias.at(-1).ate });
+            this.janelasDivididas.push({ papel, de: j.de, ate: j.ate });
+          } else {
+            yield { falhaJanela: true, janela: j, pagina, erro: e };
+          }
+          break;
         }
         for (const xml of r.compNfse) {
           let nota;

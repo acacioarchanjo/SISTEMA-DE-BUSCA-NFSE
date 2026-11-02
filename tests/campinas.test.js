@@ -100,7 +100,10 @@ async function campinasSimulada(notas, regras = {}) {
       if (!valida || (regras.algoritmo && algoritmo !== regras.algoritmo)) {
         return res.end(resp(`<${raiz} xmlns="http://www.abrasf.org.br/nfse.xsd"><ListaMensagemRetorno><MensagemRetorno><Codigo>E513</Codigo><Mensagem>Arquivo enviado com erro na assinatura. Acerte a assinatura do arquivo.</Mensagem></MensagemRetorno></ListaMensagemRetorno></${raiz}>`));
       }
-      if (regras.falharTomadas && op.includes('Tomado')) {
+      const ini = envioXml.match(/<DataInicial>([^<]+)</)?.[1];
+      const fim = envioXml.match(/<DataFinal>([^<]+)</)?.[1];
+      const diaRuim = regras.diaRuim && op.includes('Tomado') && ini <= regras.diaRuim && regras.diaRuim <= fim;
+      if (diaRuim || (regras.falharTomadas && op.includes('Tomado'))) {
         res.statusCode = 500;
         return res.end('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><soap:Fault><faultcode>soap:Server</faultcode><faultstring>Ocorreu um erro imprevisto em nossos servidores. Tente mais tarde...</faultstring></soap:Fault></soap:Body></soap:Envelope>');
       }
@@ -172,6 +175,20 @@ test('Campinas: configuração errada é sinalizada; a recomendada funciona e a 
     assert.match(r5.porPapel.tomadas.erro, /erro imprevisto.*\[notas tomadas, /);
     assert.equal(pref.pedidos.slice(antes5).filter((p) => p.op.includes('Tomado')).length, 3, '3 tentativas');
     assert.equal(pref.pedidos.slice(antes5).filter((p) => p.algoritmo !== 'sha256').length, 0, 'não troca de algoritmo por erro do servidor');
+    assert.deepEqual(repo.db.prepare('SELECT * FROM vinculos_municipais WHERE id = ?').get(vid), cursorAntes, 'período não avança');
+
+    // 6) um dia específico sempre dá erro no servidor: a janela é dividida até isolar o dia e o resto do período vem
+    pref.regras.falharTomadas = false;
+    const dia = (n) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+    pref.regras.diaRuim = dia(3);
+    const r6 = await sincronizarMunicipal(repo, vid, { de: dia(9), ate: hoje, criarConector: criar, dataDir });
+    assert.equal(r6.codigo, 'SUCESSO_PARCIAL');
+    assert.equal(r6.porPapel.tomadas.notas, 1, 'nota tomada dos outros dias recebida');
+    assert.equal(r6.porPapel.tomadas.diasComFalha, 1, 'só o dia problemático ficou de fora');
+    const br = (d) => d.split('-').reverse().join('/');
+    assert.ok(r6.porPapel.tomadas.erro.includes(`${br(dia(3))} a ${br(dia(3))}`), r6.porPapel.tomadas.erro);
+    assert.ok(r6.janelasDivididas.length >= 3);
+    assert.match(r6.mensagem, /1 dia\(s\) com erro da prefeitura/);
     assert.deepEqual(repo.db.prepare('SELECT * FROM vinculos_municipais WHERE id = ?').get(vid), cursorAntes, 'período não avança');
   } finally {
     pref.srv.close();
