@@ -33,7 +33,7 @@ if not exist ".env" (
 echo.
 echo  Restaurar backup do Buscador NFS-e
 echo  ----------------------------------
-echo  ANTES DE CONTINUAR: feche a janela do iniciar.bat (painel)
+echo  ANTES DE CONTINUAR: clique em "Encerrar" no painel ^(ou feche a janela do iniciar.bat^)
 echo  e verifique se a busca agendada nao esta rodando agora.
 echo.
 

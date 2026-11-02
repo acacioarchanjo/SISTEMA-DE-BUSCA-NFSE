@@ -90,7 +90,7 @@ export async function restaurarBackup(arquivoZip, opcoes = {}) {
   } = opcoes;
 
   if (verificarPainel && (await painelRodando())) {
-    throw new ErroRestauracao('O painel está aberto. Feche a janela do iniciar.bat e tente de novo.');
+    throw new ErroRestauracao('O sistema está aberto. Clique em "Encerrar" no painel (ou feche a janela do iniciar.bat) e tente de novo.');
   }
 
   const plano = await analisarBackup(arquivoZip);

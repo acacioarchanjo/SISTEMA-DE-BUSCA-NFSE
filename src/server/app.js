@@ -106,6 +106,12 @@ export function criarServidor(repo, opcoes = {}) {
   const rotas = [
     ['GET', /^\/api\/resumo$/, (req, res) => json(res, 200, { ...repo.resumo(), ambiente: config.ambiente })],
 
+    ['POST', /^\/api\/encerrar$/, (req, res) => {
+      if (!opcoes.aoEncerrar) throw new ErroHttp(501, 'Encerramento pelo painel indisponível.');
+      json(res, 200, { ok: true });
+      setTimeout(opcoes.aoEncerrar, 200);
+    }],
+
     ['GET', /^\/api\/empresas$/, (req, res) =>
       json(res, 200, repo.listarEmpresas().map((e) => ({ ...e, dias_para_vencer: e.cert_valido_ate ? diasParaVencer(e.cert_valido_ate) : null })))],
 

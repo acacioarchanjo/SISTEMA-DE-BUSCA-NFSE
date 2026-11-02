@@ -93,15 +93,17 @@ Depois de instalar o Node.js (versão 22 ou mais nova), dê **duplo clique em `i
 
 Para encerrar, feche a janela preta ou aperte `Ctrl+C`.
 
-### Windows: atalho na Área de Trabalho
+### Windows: atalho na Área de Trabalho (sem janela preta)
 
 Depois de rodar o `iniciar.bat` pela primeira vez, dê **duplo clique em `criar-atalho.bat`**. Ele cria o atalho
-**"Buscador NFS-e"** (com ícone) na Área de Trabalho e no Menu Iniciar. Pelo atalho:
-- a janela preta abre **minimizada** na barra de tarefas (é o sistema rodando; feche-a para encerrar);
-- o navegador abre sozinho assim que o painel está pronto;
-- se o sistema já estiver aberto, ele só abre o painel no navegador.
+**"Buscador NFS-e"** (com ícone) na Área de Trabalho e no Menu Iniciar. O atalho usa o `abrir.vbs`, que:
+- sobe o sistema **em segundo plano, sem janela preta**;
+- abre o navegador assim que o painel está pronto;
+- se o sistema já estiver aberto, só abre o painel no navegador;
+- grava o registro do servidor em `data\logs\servidor.log` e avisa se o sistema não responder.
 
-Se mudar a pasta do sistema de lugar, rode o `criar-atalho.bat` de novo.
+Para **fechar o sistema**, clique em **⏻ Encerrar** no canto do painel. Se mudar a pasta do sistema de lugar,
+rode o `criar-atalho.bat` de novo. O `iniciar.bat` continua funcionando com a janela visível, o que é útil para ver erros.
 
 ### Windows: busca automática diária
 
