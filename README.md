@@ -123,10 +123,23 @@ pode ser um pendrive, HD externo ou pasta sincronizada com a nuvem) e se inclui 
 - O ZIP (`backup-nfse-AAAA-MM-DD_HHMMSS.zip`) leva o banco, os XMLs, os logs e o `.env` com a `NFSE_MASTER_KEY`.
 - Pode rodar **com o painel aberto**: o banco é copiado pela API de backup do SQLite, então a cópia sai consistente.
 - Ficam os **10 backups mais recentes** na pasta de destino.
-- Para **restaurar**: feche o sistema, renomeie a pasta `data` atual e extraia o ZIP na pasta do projeto.
-  O passo a passo está no `LEIA-ME.txt` dentro do ZIP.
+- Para **restaurar**, use o `restaurar-backup.bat` (abaixo). O `LEIA-ME.txt` dentro do ZIP explica também como fazer à mão.
 - Para backup automático, agende `backup-dados.bat auto` no Agendador de Tarefas (roda sem perguntas e salva em `backups\`).
 - ⚠️ O backup tem dados de clientes e a chave que decifra os certificados: guarde em local protegido.
+
+### Windows: restaurar um backup
+
+1. Feche o painel (janela do `iniciar.bat`).
+2. Dê **duplo clique em `restaurar-backup.bat`** e escolha o número do backup da pasta `backups\`,
+   ou **arraste um backup `.zip`** (de um pendrive, por exemplo) para cima do `.bat`.
+3. Confira o resumo e digite **SIM**.
+
+- **Nada é apagado:** a pasta `data` e o `.env` atuais são guardados como `data-antes-restauracao-<data>` e
+  `.env.antes-restauracao-<data>`. Depois de conferir que está tudo certo, você pode apagá-los.
+- Se algo falhar no meio (ZIP corrompido, banco inválido, arquivo em uso), **tudo volta como estava**.
+- O `.bat` recusa restaurar com o painel aberto.
+- Depois de restaurar, ele confere se a chave do `.env` abre os certificados. Se o backup foi feito sem o `.env`,
+  coloque a `NFSE_MASTER_KEY` da época do backup ou cadastre os certificados de novo.
 
 ### Linha de comando
 
@@ -143,6 +156,8 @@ npm run cli -- exportar --csv -e 1 -o marco.csv          # só a planilha
 npm run cli -- conciliar 1 --de 2026-03-01 --ate 2026-03-31       # (experimental) confere com o portal
 npm run cli -- agendar                                   # fica rodando conforme NFSE_ADN_CRON
 npm run cli -- backup --destino E:\Backups               # ZIP com banco, XMLs, logs e .env
+npm run cli -- backups                                   # lista os backups de ./backups
+npm run cli -- restaurar 1 --sim                         # restaura o backup nº 1 (sem --sim só mostra o resumo)
 ```
 
 ### Como a busca funciona
