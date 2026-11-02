@@ -43,14 +43,14 @@ function sanIcpBrasil(cnpj) {
 
 let chavesCache;
 /** Gera um .pfx (Buffer) de teste. */
-export function gerarPfx({ cnpj = CNPJ_TESTE, senha = '1234', comSan = true, cn, vencido = false, algoritmo = '3des' } = {}) {
+export function gerarPfx({ cnpj = CNPJ_TESTE, senha = '1234', comSan = true, cn, vencido = false, algoritmo = '3des', diasValidade = 365 } = {}) {
   chavesCache ??= forge.pki.rsa.generateKeyPair(1024);
   const cert = forge.pki.createCertificate();
   cert.publicKey = chavesCache.publicKey;
   cert.serialNumber = '01' + crypto.randomBytes(6).toString('hex');
   const agora = new Date();
   cert.validity.notBefore = new Date(agora.getTime() - (vencido ? 400 : 1) * 86_400_000);
-  cert.validity.notAfter = new Date(agora.getTime() + (vencido ? -1 : 365) * 86_400_000);
+  cert.validity.notAfter = new Date(agora.getTime() + (vencido ? -1 : diasValidade) * 86_400_000);
   const attrs = [
     { name: 'commonName', value: cn ?? `EMPRESA TESTE LTDA:${cnpj}` },
     { name: 'organizationName', value: 'ICP-Brasil' },

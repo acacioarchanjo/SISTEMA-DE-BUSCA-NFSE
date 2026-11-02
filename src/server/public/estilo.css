@@ -404,3 +404,19 @@ td.nome { min-width: 140px; max-width: 210px; }
 }
 @media (max-width: 1480px) { .col-ret { display: none; } }
 @media (max-width: 860px) { .kpi b { font-size: 19px; } .kpi { padding: 14px; } }
+
+/* ---------- importação em lote ---------- */
+.modal.largo { width: min(980px, 96vw); }
+.lote { display: flex; flex-direction: column; gap: 14px; padding: 22px; }
+.lote-opcoes { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+.lote-senha-todos { display: flex; gap: 8px; flex: 1 1 380px; }
+.lote-senha-todos input { flex: 1; }
+.lote-tabela { max-height: 46vh; border: 1px solid var(--borda); border-radius: 12px; }
+.lote-tabela input[type=password] { width: 150px; padding: 6px 8px; }
+.lote-tabela td.nome { max-width: 240px; }
+.lote-rodape { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.lote-rodape menu { display: flex; gap: 8px; margin: 0; padding: 0; }
+.soltar .link { padding: 0; font-size: 12px; display: inline; }
+.giro { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: girar .7s linear infinite; vertical-align: -2px; }
+@keyframes girar { to { transform: rotate(360deg); } }
+.toasts[popover] { inset: auto 20px 20px auto; margin: 0; padding: 0; border: 0; background: transparent; overflow: visible; color: inherit; }

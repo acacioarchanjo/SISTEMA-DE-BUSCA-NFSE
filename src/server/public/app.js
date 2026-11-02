@@ -1,4 +1,6 @@
 // Front-end do painel (JS puro, sem framework).
+import { lerPlanilhaSenhas, senhaPara } from './compartilhado/senhas.js';
+
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -57,7 +59,10 @@ function avisar(msg, tipo = 'ok') {
   el.innerHTML = `<span class="ic">${icone(tipo === 'erro' ? 'alert' : 'check')}</span><p>${esc(msg)}</p><button title="Fechar">${icone('x')}</button>`;
   const fechar = () => { el.classList.add('saindo'); setTimeout(() => el.remove(), 250); };
   el.querySelector('button').addEventListener('click', fechar);
-  $('#toasts').append(el);
+  const caixa = $('#toasts');
+  caixa.append(el);
+  // Traz os avisos para a frente de janelas abertas (diálogos ficam na "top layer").
+  if (caixa.showPopover) { try { caixa.hidePopover(); } catch { /* fechado */ } caixa.showPopover(); }
   setTimeout(fechar, tipo === 'erro' ? 10000 : 6000);
 }
 
@@ -482,6 +487,166 @@ async function carregarExecucoes() {
         <td class="quebra">${esc(x.mensagem ?? '')}</td></tr>`).join('')
     : '<tr><td colspan="8" class="vazio">Nenhuma execução ainda. Clique em “Buscar notas” numa empresa.</td></tr>';
 }
+
+// ---------------- Importação em lote ----------------
+const SITUACAO_LOTE = {
+  nova: ['ok', 'Nova empresa'],
+  renovacao: ['primaria', 'Renovação'],
+  mesmo: ['', 'Já cadastrado'],
+  mais_antigo: ['alerta', 'Cadastrado vence depois'],
+};
+let lote = []; // { arquivo:File, senha, estado:'pendente'|'validando'|'valido'|'erro'|'gravando'|'feito', analise, erro }
+let loteOcupado = false;
+const importavel = (l) => l.estado === 'valido' && ['nova', 'renovacao'].includes(l.analise?.situacao);
+
+function adicionarAoLote(arquivos) {
+  const novos = [...arquivos].filter((f) => /\.(pfx|p12)$/i.test(f.name));
+  const ignorados = arquivos.length - novos.length;
+  for (const f of novos) {
+    if (lote.some((l) => l.arquivo.name === f.name && l.arquivo.size === f.size)) continue;
+    lote.push({ arquivo: f, senha: $('#lote-senha-todos').value, estado: 'pendente' });
+  }
+  if (ignorados > 0 && novos.length === 0) avisar('Nenhum arquivo .pfx ou .p12 encontrado.', 'erro');
+  desenharLote();
+}
+
+function desenharLote() {
+  $('#lote-tabela').classList.toggle('oculto', !lote.length);
+  $('#lote-linhas').innerHTML = lote.map((l, i) => {
+    let empresa = '<span class="sub">—</span>';
+    let validade = '';
+    let situacao = '<span class="pilula">aguardando validação</span>';
+    if (l.estado === 'validando' || l.estado === 'gravando') situacao = `<span class="pilula executando">${l.estado === 'validando' ? 'validando…' : 'gravando…'}</span>`;
+    if (l.estado === 'erro') situacao = `<span class="pilula erro" title="${esc(l.erro)}">${esc(l.erro)}</span>`;
+    if (l.analise) {
+      empresa = `<b>${esc(l.analise.nome)}</b><span class="sub">${esc(doc(l.analise.cnpj))}</span>`;
+      validade = dataBR(l.analise.validoAte);
+      if (l.estado === 'valido') { const [c, t] = SITUACAO_LOTE[l.analise.situacao]; situacao = `<span class="pilula ${c}">${t}</span>`; }
+      if (l.estado === 'feito') situacao = `<span class="pilula ok">${l.analise.situacao === 'renovacao' ? 'renovada' : 'cadastrada'} ✓</span>`;
+    }
+    const travado = loteOcupado || l.estado === 'feito';
+    return `<tr>
+      <td class="nome"><b>${esc(l.arquivo.name)}</b><span class="sub">${(l.arquivo.size / 1024).toFixed(1)} KB</span></td>
+      <td><input type="password" data-senha="${i}" value="${esc(l.senha)}" placeholder="senha" autocomplete="off" ${travado ? 'disabled' : ''}></td>
+      <td class="nome">${empresa}</td>
+      <td>${validade}</td>
+      <td class="quebra">${situacao}</td>
+      <td><button class="icone-acao" data-remover="${i}" title="Remover da lista" ${travado ? 'disabled' : ''}>${icone('x')}</button></td>
+    </tr>`;
+  }).join('');
+  const n = (f) => lote.filter(f).length;
+  const prontos = n(importavel);
+  const feitos = n((l) => l.estado === 'feito');
+  const erros = n((l) => l.estado === 'erro');
+  const pendentes = n((l) => l.estado === 'pendente');
+  $('#lote-resumo').textContent = lote.length
+    ? `${lote.length} certificado(s) · ${prontos} pronto(s) para cadastrar · ${pendentes} a validar · ${erros} com erro${feitos ? ` · ${feitos} gravado(s)` : ''}`
+    : '';
+  $('#btn-lote-validar').disabled = loteOcupado || !pendentes;
+  $('#btn-lote-cadastrar').disabled = loteOcupado || !prontos;
+  $('#btn-lote-cadastrar').textContent = prontos ? `Cadastrar ${prontos}` : 'Cadastrar';
+}
+
+$('#btn-lote').addEventListener('click', () => {
+  if (!loteOcupado && lote.every((l) => l.estado === 'feito')) lote = [];
+  desenharLote();
+  $('#dlg-lote').showModal();
+});
+$('#lote-arquivos').addEventListener('change', (ev) => { adicionarAoLote(ev.target.files); ev.target.value = ''; });
+$('#lote-pasta').addEventListener('change', (ev) => { adicionarAoLote(ev.target.files); ev.target.value = ''; });
+$('#btn-lote-pasta').addEventListener('click', (ev) => { ev.preventDefault(); $('#lote-pasta').click(); });
+const areaLote = $('#area-lote');
+['dragenter', 'dragover'].forEach((t) => areaLote.addEventListener(t, (ev) => { ev.preventDefault(); areaLote.classList.add('arrastando'); }));
+['dragleave', 'drop'].forEach((t) => areaLote.addEventListener(t, () => areaLote.classList.remove('arrastando')));
+areaLote.addEventListener('drop', (ev) => { ev.preventDefault(); adicionarAoLote(ev.dataTransfer.files); });
+
+$('#lote-linhas').addEventListener('input', (ev) => {
+  const i = ev.target.dataset.senha;
+  if (i === undefined) return;
+  const l = lote[Number(i)];
+  l.senha = ev.target.value;
+  if (l.estado !== 'feito') { l.estado = 'pendente'; l.analise = null; l.erro = null; }
+  // atualiza só o resumo/botões, sem redesenhar (para não perder o foco do campo)
+  const prontos = lote.filter(importavel).length;
+  $('#btn-lote-validar').disabled = loteOcupado;
+  $('#btn-lote-cadastrar').disabled = loteOcupado || !prontos;
+});
+$('#lote-linhas').addEventListener('change', (ev) => { if (ev.target.dataset.senha !== undefined) desenharLote(); });
+$('#lote-linhas').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-remover]');
+  if (!b) return;
+  lote.splice(Number(b.dataset.remover), 1);
+  desenharLote();
+});
+
+$('#btn-lote-aplicar').addEventListener('click', () => {
+  const senha = $('#lote-senha-todos').value;
+  let n = 0;
+  for (const l of lote) if (!l.senha && l.estado !== 'feito') { l.senha = senha; l.estado = 'pendente'; l.analise = null; n++; }
+  desenharLote();
+  avisar(n ? `Senha aplicada a ${n} certificado(s) sem senha.` : 'Todos os certificados já têm senha preenchida.');
+});
+
+$('#btn-lote-csv').addEventListener('click', () => $('#lote-csv').click());
+$('#lote-csv').addEventListener('change', async (ev) => {
+  const f = ev.target.files[0];
+  ev.target.value = '';
+  if (!f) return;
+  const mapa = lerPlanilhaSenhas(await f.text());
+  let n = 0;
+  for (const l of lote) {
+    if (l.estado === 'feito') continue;
+    const senha = senhaPara(mapa, l.arquivo.name, l.analise?.cnpj);
+    if (senha !== undefined) { l.senha = senha; l.estado = 'pendente'; l.analise = null; n++; }
+  }
+  desenharLote();
+  avisar(`Planilha lida: ${mapa.size} linha(s); senha preenchida em ${n} de ${lote.length} certificado(s).`, n ? 'ok' : 'erro');
+});
+
+async function validarLote() {
+  loteOcupado = true;
+  for (const l of lote) {
+    if (l.estado !== 'pendente') continue;
+    l.estado = 'validando';
+    desenharLote();
+    try {
+      l.base64 ??= await arquivoParaBase64(l.arquivo);
+      l.analise = await api('/api/certificados/analisar', { metodo: 'POST', corpo: { pfxBase64: l.base64, senha: l.senha } });
+      l.estado = 'valido';
+    } catch (e) {
+      l.estado = 'erro';
+      l.erro = e.message;
+    }
+  }
+  loteOcupado = false;
+  desenharLote();
+}
+$('#btn-lote-validar').addEventListener('click', validarLote);
+
+$('#btn-lote-cadastrar').addEventListener('click', async () => {
+  const fila = lote.filter(importavel);
+  if (!fila.length) return;
+  const renov = fila.filter((l) => l.analise.situacao === 'renovacao').length;
+  if (!confirm(`Cadastrar ${fila.length - renov} empresa(s) nova(s) e renovar ${renov} certificado(s)?`)) return;
+  loteOcupado = true;
+  let ok = 0;
+  for (const l of fila) {
+    l.estado = 'gravando';
+    desenharLote();
+    try {
+      await api('/api/empresas', { metodo: 'POST', corpo: { pfxBase64: l.base64, senha: l.senha } });
+      l.estado = 'feito';
+      ok++;
+    } catch (e) {
+      l.estado = 'erro';
+      l.erro = e.message;
+    }
+  }
+  loteOcupado = false;
+  desenharLote();
+  avisar(`${ok} de ${fila.length} certificado(s) gravado(s).`, ok === fila.length ? 'ok' : 'erro');
+  atualizar();
+});
 
 // ---------------- Encerrar ----------------
 let encerrado = false;

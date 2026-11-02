@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
-import { cadastrarEmpresa } from '../crypto/credenciais.js';
+import { cadastrarEmpresa, analisarCertificado } from '../crypto/credenciais.js';
 import { sincronizarEmpresa, importarXml } from '../adn/distribuicao.js';
 import { conciliarEmpresa } from '../portal/conciliacao.js';
 import { lerXmlSalvo, excluirXmlsDaEmpresa } from '../nfse/armazenamento.js';
@@ -16,6 +16,8 @@ import { ErroCofre } from '../crypto/cofre.js';
 import { ErroParser } from '../nfse/parser.js';
 
 const PUBLICO = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
+// Módulos usados tanto pelo servidor/CLI quanto pelo navegador (mesma regra nos dois lados).
+const COMPARTILHADOS = { 'compartilhado/senhas.js': path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'util', 'senhas.js') };
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
 const LIMITE_CORPO = 15 * 1024 * 1024;
 
@@ -125,6 +127,13 @@ export function criarServidor(repo, opcoes = {}) {
         razaoSocial: b.razaoSocial,
       });
       json(res, 201, { ...r, empresa: repo.obterEmpresa(r.id) });
+    }],
+
+    // Importação em lote: valida um certificado e diz o que aconteceria, sem gravar.
+    ['POST', /^\/api\/certificados\/analisar$/, async (req, res) => {
+      const b = await lerCorpo(req);
+      if (!b.pfxBase64) throw new ErroHttp(400, 'Envie o certificado .pfx.');
+      json(res, 200, analisarCertificado(repo, { pfx: Buffer.from(b.pfxBase64, 'base64'), senha: b.senha ?? '', cnpj: b.cnpj }));
     }],
 
     ['PATCH', /^\/api\/empresas\/(\d+)$/, async (req, res, [id]) => {
@@ -261,8 +270,8 @@ export function criarServidor(repo, opcoes = {}) {
 
     if (metodo !== 'GET') throw new ErroHttp(405, 'Método não permitido.');
     const nome = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
-    const abs = path.resolve(PUBLICO, nome);
-    if (!abs.startsWith(PUBLICO + path.sep) || !fs.existsSync(abs)) throw new ErroHttp(404, 'Não encontrado.');
+    const abs = COMPARTILHADOS[nome] ?? path.resolve(PUBLICO, nome);
+    if ((!COMPARTILHADOS[nome] && !abs.startsWith(PUBLICO + path.sep)) || !fs.existsSync(abs)) throw new ErroHttp(404, 'Não encontrado.');
     res.writeHead(200, {
       'Content-Type': MIME[path.extname(abs)] ?? 'application/octet-stream',
       'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self'",
