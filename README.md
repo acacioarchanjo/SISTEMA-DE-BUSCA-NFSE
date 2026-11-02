@@ -52,6 +52,14 @@ Um robô **100% local** que baixa automaticamente as **NFS-e (Notas Fiscais de S
 
 ---
 
+## 🗺️ Arquitetura e evolução
+
+- [Arquitetura de robôs RPA fiscais (ISS e NFS-e)](docs/arquitetura-rpa-iss-nfse.md): rotina operacional, conectores por
+  sistema municipal (Paulistana, DSF, GISS, SigISS, Betha, ABRASF), validação fiscal, orquestração em nuvem, resiliência,
+  human-in-the-loop, catálogo de status, log de auditoria e roteiro a partir deste projeto.
+
+---
+
 ## 🚀 Como rodar
 
 Requisitos: **Node.js 22 ou mais novo** (22, 24 e 26 funcionam; o banco `better-sqlite3` 13 já vem compilado
