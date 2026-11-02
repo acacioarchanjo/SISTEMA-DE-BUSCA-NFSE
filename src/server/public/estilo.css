@@ -495,3 +495,4 @@ tr.clicavel { cursor: pointer; }
 .resposta-bruta { white-space: pre-wrap; word-break: break-all; font: 11px ui-monospace, "Cascadia Mono", Consolas, monospace; background: var(--superficie-2); padding: 10px; border-radius: 8px; max-height: 220px; overflow: auto; margin: 0; }
 .vinculo .recomendacao { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 12px; border-radius: 10px; background: var(--alerta-suave); font-size: 13px; }
 .vinculo .ultima-msg { color: var(--erro); }
+.texto-erro { color: var(--erro); }

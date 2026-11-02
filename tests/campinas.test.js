@@ -100,6 +100,10 @@ async function campinasSimulada(notas, regras = {}) {
       if (!valida || (regras.algoritmo && algoritmo !== regras.algoritmo)) {
         return res.end(resp(`<${raiz} xmlns="http://www.abrasf.org.br/nfse.xsd"><ListaMensagemRetorno><MensagemRetorno><Codigo>E513</Codigo><Mensagem>Arquivo enviado com erro na assinatura. Acerte a assinatura do arquivo.</Mensagem></MensagemRetorno></ListaMensagemRetorno></${raiz}>`));
       }
+      if (regras.falharTomadas && op.includes('Tomado')) {
+        res.statusCode = 500;
+        return res.end('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><soap:Fault><faultcode>soap:Server</faultcode><faultstring>Ocorreu um erro imprevisto em nossos servidores. Tente mais tarde...</faultstring></soap:Fault></soap:Body></soap:Envelope>');
+      }
       const lista = notas[op.includes('Tomado') ? 'tomadas' : 'prestadas'] ?? [];
       res.end(resp(lista.length
         ? `<${raiz} xmlns="http://www.abrasf.org.br/nfse.xsd"><ListaNfse>${lista.join('')}</ListaNfse></${raiz}>`
@@ -157,6 +161,18 @@ test('Campinas: configuração errada é sinalizada; a recomendada funciona e a 
     assert.equal(t2.algoritmoAssinatura, 'sha256');
     assert.deepEqual(pref.pedidos.slice(-2).map((p) => p.algoritmo), ['sha1', 'sha256']);
     assert.equal(repo.obterMunicipio(CAMPINAS).opcoes.algoritmoAssinatura, 'sha256', 'algoritmo lembrado');
+
+    // 5) "erro imprevisto" do servidor nas tomadas: tenta de novo (3x), guarda as prestadas e não avança o período
+    pref.regras.falharTomadas = true;
+    const cursorAntes = repo.db.prepare('SELECT * FROM vinculos_municipais WHERE id = ?').get(vid);
+    const antes5 = pref.pedidos.length;
+    const r5 = await sincronizarMunicipal(repo, vid, { de: hoje, ate: hoje, criarConector: criar, dataDir });
+    assert.equal(r5.codigo, 'SUCESSO_PARCIAL');
+    assert.deepEqual(r5.porPapel.prestadas, { notas: 1, novas: 0 });
+    assert.match(r5.porPapel.tomadas.erro, /erro imprevisto.*\[notas tomadas, /);
+    assert.equal(pref.pedidos.slice(antes5).filter((p) => p.op.includes('Tomado')).length, 3, '3 tentativas');
+    assert.equal(pref.pedidos.slice(antes5).filter((p) => p.algoritmo !== 'sha256').length, 0, 'não troca de algoritmo por erro do servidor');
+    assert.deepEqual(repo.db.prepare('SELECT * FROM vinculos_municipais WHERE id = ?').get(vid), cursorAntes, 'período não avança');
   } finally {
     pref.srv.close();
     limpar(dataDir);

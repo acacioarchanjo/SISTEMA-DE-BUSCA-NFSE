@@ -140,6 +140,11 @@ export function lerResposta(perfil, papel, { status, corpo }) {
   if (fault) {
     const msg = texto(achar(fault, 'faultstring')) || texto(achar(fault, 'Text')) || texto(achar(fault, 'Reason')) || 'erro SOAP';
     const auth = /certificad|autoriz|permiss|credencia|acesso negado/i.test(msg);
+    const codigoFault = String(texto(achar(fault, 'faultcode')) || texto(achar(achar(fault, 'Code') ?? {}, 'Value')) || '');
+    // "Ocorreu um erro imprevisto em nossos servidores. Tente mais tarde" (Campinas) e afins: falha do lado da prefeitura
+    if (!auth && /imprevist|tente (mais tarde|novamente)|indispon|temporariamente|sobrecarg|timeout|tempo (limite|esgotado)|internal server error/i.test(msg)) {
+      throw new ErroConector('PORTAL_INDISPONIVEL', 'SERVIDOR_FORA', `Servidor da prefeitura com erro: ${String(msg).slice(0, 300)}`, { status, resposta: bruto, temporario: true, faultcode: codigoFault });
+    }
     throw new ErroConector(auth ? 'ERRO_AUTENTICACAO' : 'DADO_INCONSISTENTE', auth ? 'ACESSO_NEGADO' : 'SOAP_FAULT', `Erro SOAP da prefeitura: ${String(msg).slice(0, 300)}`, { status, resposta: bruto });
   }
   if (status >= 500) {

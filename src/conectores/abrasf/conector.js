@@ -44,6 +44,7 @@ export class ConectorAbrasf {
     this.assinar = !!this.opcoes.assinarConsulta;
     this.algoritmo = this.opcoes.algoritmoAssinatura || 'sha1';
     this.assinaturaDetectada = false; // vira true se a prefeitura recusar consulta sem assinatura
+    this.sucessos = 0; // depois que uma consulta passa, a assinatura/algoritmo já estão certos
 
     let url;
     try {
@@ -85,7 +86,7 @@ export class ConectorAbrasf {
     try {
       return await this.#chamarComRetentativa(papel, envio);
     } catch (e) {
-      if (!problemaAssinatura(e)) throw e;
+      if (!problemaAssinatura(e) || this.sucessos > 0) throw e;
       if (!this.assinar) {
         this.assinar = true;
         this.assinaturaDetectada = true;
@@ -129,7 +130,9 @@ export class ConectorAbrasf {
           corpo,
           timeoutMs: Number(this.opcoes.timeoutMs),
         });
-        return lerResposta(this.perfil, papel, r);
+        const lida = lerResposta(this.perfil, papel, r);
+        this.sucessos++;
+        return lida;
       } catch (e) {
         let erro = e;
         if (e instanceof ErroAdn) {
@@ -161,7 +164,18 @@ export class ConectorAbrasf {
       let pagina = 1;
       while (pagina <= this.opcoes.maxPaginas) {
         const envio = montarEnvio(this.perfil, papel, { cnpj: this.cred.cnpj, im: this.im, de: j.de, ate: j.ate, pagina, periodo: this.opcoes.periodo, namespace: this.opcoes.namespaceDados });
-        const r = await this.#chamar(papel, envio);
+        let r;
+        try {
+          r = await this.#chamar(papel, envio);
+        } catch (e) {
+          const br = (d) => d.split('-').reverse().join('/');
+          if (e instanceof ErroConector && !e.janela) {
+            e.papel = papel;
+            e.janela = j;
+            e.message = `${e.message} [notas ${papel}, ${br(j.de)} a ${br(j.ate)}${pagina > 1 ? `, página ${pagina}` : ''}]`;
+          }
+          throw e;
+        }
         for (const xml of r.compNfse) {
           let nota;
           try {
