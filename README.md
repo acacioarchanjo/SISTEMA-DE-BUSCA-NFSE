@@ -104,6 +104,17 @@ Para encerrar, feche a janela preta ou aperte `Ctrl+C`.
 - Se alguma empresa falhar, a tarefa termina com código 1 ("Último resultado" no Agendador).
 - Para remover: `agendar-busca-diaria.bat remover`.
 
+### Windows: exportar as notas do mês
+
+Dê **duplo clique em `exportar-mes.bat`** e responda as perguntas:
+1. o mês de competência (padrão: mês anterior);
+2. a empresa (id ou CNPJ, ou Enter para todas);
+3. se quer o PDF de cada nota.
+
+O ZIP vai para a pasta `exportacoes\` (ex.: `nfse-2026-03.zip`), com os XMLs organizados por
+empresa/emitidas/recebidas e a `planilha-nfse.csv`, e a pasta abre sozinha no Explorer.
+A pasta `exportacoes/` fica fora do Git, porque contém dados de clientes.
+
 ### Linha de comando
 
 ```bash
@@ -114,7 +125,7 @@ npm run cli -- buscar                                    # busca todas as empres
 npm run cli -- buscar 11222333000181                     # busca uma empresa (id ou CNPJ)
 npm run cli -- cursor 1 0                                # volta o cursor NSU (rebaixa tudo)
 npm run cli -- importar 1 ./pasta-com-xmls               # importa XMLs já baixados (notas e eventos)
-npm run cli -- exportar --de 2026-03-01 --ate 2026-03-31 --pdf    # ZIP com XMLs + planilha + PDFs
+npm run cli -- exportar --mes 2026-03 --pdf               # ZIP do mês com XMLs + planilha + PDFs
 npm run cli -- exportar --csv -e 1 -o marco.csv          # só a planilha
 npm run cli -- conciliar 1 --de 2026-03-01 --ate 2026-03-31       # (experimental) confere com o portal
 npm run cli -- agendar                                   # fica rodando conforme NFSE_ADN_CRON
