@@ -96,6 +96,7 @@ export class ClienteAdn {
     this.sefinHost = opcoes.sefinHost ?? config.sefin.host;
     this.agent = new https.Agent({ keepAlive: true, cert, key, ca: opcoes.ca, maxSockets: 1 });
     this.tentativas = opcoes.tentativas ?? 4;
+    this.aoRetentar = opcoes.aoRetentar ?? null; // ({ erro, tentativa, esperaMs }) — usado no log de auditoria
     this.esperaBaseMs = opcoes.esperaBaseMs ?? 2000;
   }
 
@@ -141,6 +142,7 @@ export class ClienteAdn {
         ultimoErro = e;
         if (!(e instanceof ErroAdn) || !e.temporario || t === this.tentativas - 1) throw e;
         const espera = this.esperaBaseMs * 2 ** t;
+        this.aoRetentar?.({ erro: e.message, tentativa: t + 1, esperaMs: espera, em: new Date().toISOString() });
         debug(`tentativa ${t + 1} falhou (${e.message}); nova tentativa em ${espera}ms`);
         await new Promise((r) => setTimeout(r, espera));
       }

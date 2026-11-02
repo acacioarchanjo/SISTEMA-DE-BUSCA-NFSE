@@ -45,6 +45,7 @@
         <button data-aba="inicio" class="ativa"><svg><use href="#i-home"/></svg><span>Início</span></button>
         <button data-aba="empresas"><svg><use href="#i-building"/></svg><span>Empresas</span><em id="cont-empresas"></em></button>
         <button data-aba="notas"><svg><use href="#i-file"/></svg><span>Notas</span><em id="cont-notas"></em></button>
+        <button data-aba="conferencia"><svg><use href="#i-shield"/></svg><span>Conferência</span><em id="cont-conferencia" class="perigo"></em></button>
         <button data-aba="execucoes"><svg><use href="#i-activity"/></svg><span>Execuções</span><i id="indicador-exec" class="pulso oculto"></i></button>
       </nav>
       <div class="lateral-rodape">
@@ -141,6 +142,11 @@
             <option value="cancelada">Canceladas</option>
             <option value="substituida">Substituídas</option>
           </select>
+          <select name="divergencia" title="Conferência fiscal">
+            <option value="">Conferência: todas</option>
+            <option value="qualquer">Com divergência</option>
+            <option value="bloqueante">Só bloqueantes</option>
+          </select>
           <label class="campo-data"><span>Competência de</span><input type="date" name="de"></label>
           <label class="campo-data"><span>até</span><input type="date" name="ate"></label>
           <button type="submit" class="botao">Filtrar</button>
@@ -152,7 +158,7 @@
           <table>
             <thead><tr>
               <th>Competência</th><th>Nº</th><th>Prestador</th><th>Tomador</th>
-              <th class="num">Valor</th><th class="num">ISS</th><th class="num col-ret">Retenções</th><th class="num">Líquido</th><th>Situação</th><th></th>
+              <th class="num">Valor</th><th class="num">ISS</th><th class="num col-ret">Retenções</th><th class="num">Líquido</th><th>Situação</th><th title="Conferência fiscal">Conf.</th><th></th>
             </tr></thead>
             <tbody id="lista-notas"></tbody>
           </table>
@@ -164,17 +170,56 @@
         </div>
       </main>
 
+      <!-- CONFERÊNCIA FISCAL -->
+      <main id="aba-conferencia" class="aba oculto">
+        <header class="cabecalho">
+          <div>
+            <h1>Conferência fiscal</h1>
+            <p>Divergências encontradas nas notas: retenção, alíquota, competência e cancelamento. O robô aponta; a decisão é sua.</p>
+          </div>
+          <div class="acoes">
+            <button id="btn-regras" class="botao secundario"><svg><use href="#i-file"/></svg>Regras</button>
+            <button id="btn-revalidar" class="botao"><svg><use href="#i-refresh"/></svg>Conferir de novo</button>
+          </div>
+        </header>
+        <div class="kpis kpis-3" id="conf-kpis"></div>
+        <form id="filtros-conf" class="cartao filtros">
+          <div class="segmentado" role="radiogroup" aria-label="Situação">
+            <label><input type="radio" name="status" value="aberta" checked><span>Abertas</span></label>
+            <label><input type="radio" name="status" value="ignorada"><span>Ignoradas</span></label>
+            <label><input type="radio" name="status" value="resolvida"><span>Resolvidas</span></label>
+            <label><input type="radio" name="status" value="todas"><span>Todas</span></label>
+          </div>
+          <select name="severidade">
+            <option value="">Todas as severidades</option>
+            <option value="BLOQUEANTE">Bloqueantes</option>
+            <option value="ALERTA">Alertas</option>
+            <option value="INFO">Informativas</option>
+          </select>
+          <select name="empresa" id="conf-empresa"><option value="">Todas as empresas</option></select>
+        </form>
+        <div class="lista-div" id="lista-divergencias"></div>
+      </main>
+
       <!-- EXECUÇÕES -->
       <main id="aba-execucoes" class="aba oculto">
         <header class="cabecalho">
           <div>
             <h1>Execuções</h1>
-            <p>Histórico das buscas no ADN e das conciliações. Atualiza sozinho enquanto há busca rodando.</p>
+            <p>Histórico das buscas no ADN e das conciliações. Clique numa linha para ver os detalhes.</p>
           </div>
         </header>
+        <section class="cartao faixa-auditoria" id="faixa-auditoria">
+          <span class="ic"><svg><use href="#i-shield"/></svg></span>
+          <div><b>Log de auditoria</b><span id="aud-texto">verificando…</span></div>
+          <div class="acoes">
+            <button id="btn-aud-verificar" class="botao secundario pequeno">Verificar integridade</button>
+            <a class="botao secundario pequeno" href="/api/auditoria/exportar"><svg><use href="#i-download"/></svg>Exportar JSON</a>
+          </div>
+        </section>
         <div class="cartao tabela-wrap">
           <table>
-            <thead><tr><th>Status</th><th>Empresa</th><th>Tipo</th><th>Início</th><th>Duração</th><th class="num">Lotes</th><th class="num">Novas</th><th>Mensagem</th></tr></thead>
+            <thead><tr><th>Resultado</th><th>Empresa</th><th>Tipo</th><th>Início</th><th>Duração</th><th class="num">Lotes</th><th class="num">Novas</th><th>Mensagem</th></tr></thead>
             <tbody id="lista-execucoes"></tbody>
           </table>
         </div>
@@ -287,6 +332,27 @@
       <button type="button" class="botao-fantasma icone-so" data-fechar title="Fechar"><svg><use href="#i-x"/></svg></button>
     </div>
     <div id="detalhe-nota"></div>
+  </dialog>
+
+  <!-- Painel lateral: detalhes da execução -->
+  <dialog id="dlg-exec" class="gaveta">
+    <div class="modal-topo">
+      <h3 id="titulo-exec">Execução</h3>
+      <button type="button" class="botao-fantasma icone-so" data-fechar title="Fechar"><svg><use href="#i-x"/></svg></button>
+    </div>
+    <div id="detalhe-exec"></div>
+  </dialog>
+
+  <!-- Diálogo: catálogo de regras -->
+  <dialog id="dlg-regras" class="modal largo">
+    <div class="lote">
+      <div class="modal-topo">
+        <h3>Regras da conferência fiscal</h3>
+        <button type="button" class="botao-fantasma icone-so" data-fechar title="Fechar"><svg><use href="#i-x"/></svg></button>
+      </div>
+      <p class="dica"><svg><use href="#i-shield"/></svg>Regras nacionais (LC 116, LC 157, LC 123). Leis municipais podem exigir ou dispensar retenções: por isso cada divergência pode ser ignorada com justificativa, que fica registrada na auditoria.</p>
+      <div class="tabela-wrap"><table><thead><tr><th>Regra</th><th>O que verifica</th><th>Severidade</th><th>Base legal</th><th>Desde</th></tr></thead><tbody id="lista-regras"></tbody></table></div>
+    </div>
   </dialog>
 
   <input type="file" id="arquivo-importar" accept=".xml" multiple class="oculto">

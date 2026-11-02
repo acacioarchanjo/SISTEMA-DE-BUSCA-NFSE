@@ -2,6 +2,7 @@
 import { cifrar, decifrar, decifrarTexto } from './cofre.js';
 import { lerCertificado, certificadoVencido, ErroCertificado } from './certificado.js';
 import { somenteDigitos, validarCnpj, formatarCnpj } from '../util/formatos.js';
+import { registrarAuditoria } from '../auditoria.js';
 
 /**
  * Abre e valida o certificado, sem gravar nada.
@@ -73,6 +74,17 @@ export function cadastrarEmpresa(repo, { pfx, senha, cnpj, razaoSocial }) {
     cert_cn: info.cn,
     cert_emissor: info.emissor,
     cert_valido_ate: info.validoAte,
+  });
+  registrarAuditoria(repo.db, {
+    tipo: existente ? 'empresa.certificado_renovado' : 'empresa.cadastrada',
+    empresaCnpj: doc,
+    payload: {
+      empresa_id: id,
+      cnpj: doc,
+      razao_social: repo.obterEmpresa(id)?.razao_social,
+      certificado: { titular: info.cn, emissor: info.emissor, valido_ate: info.validoAte, numero_serie: info.numeroSerie },
+      validade_anterior: existente?.cert_valido_ate ?? null,
+    },
   });
   return {
     id,

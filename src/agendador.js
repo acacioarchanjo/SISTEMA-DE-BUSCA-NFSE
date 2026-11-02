@@ -17,7 +17,7 @@ export function iniciarAgendador(repo, log = console.log) {
         rodando = true;
         log('[agendador] busca ADN iniciada');
         try {
-          for (const r of await sincronizarTodas(repo)) log(`[agendador] ${r.empresa}: ${r.ok ? 'OK' : 'ERRO'} — ${r.mensagem}`);
+          for (const r of await sincronizarTodas(repo, { disparo: { origem: 'agendador', regra: cronAdn } })) log(`[agendador] ${r.empresa}: ${r.codigo} — ${r.mensagem}`);
         } finally {
           rodando = false;
         }

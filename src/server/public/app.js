@@ -20,6 +20,12 @@ const icone = (nome) => `<svg><use href="#i-${nome}"/></svg>`;
 const PAPEL = { emitida: 'Emitida', recebida: 'Recebida', intermediario: 'Intermediário', outro: 'Outro' };
 const TIPO_EXEC = { busca_adn: 'Busca no ADN', conciliacao: 'Conciliação' };
 const STATUS_EXEC = { ok: 'Concluída', erro: 'Erro', travada: 'Travada', executando: 'Executando' };
+const SEVERIDADE = { BLOQUEANTE: 'Bloqueante', ALERTA: 'Alerta', INFO: 'Informativa' };
+const STATUS_DIV = { aberta: 'aberta', ignorada: 'ignorada', resolvida: 'resolvida' };
+// Catálogo de status e regras (carregado do servidor uma vez)
+let catalogo = { status: {}, subcodigos: {}, regras: [] };
+const infoStatus = (x) => catalogo.status[x.codigo] ?? { rotulo: STATUS_EXEC[x.status] ?? x.status, tipo: x.status };
+const classeStatus = (tipo) => ({ ok: 'ok', alerta: 'alerta', erro: 'erro', executando: 'executando', neutro: '' })[tipo] ?? '';
 
 function relativo(s) {
   const d = paraData(s);
@@ -128,14 +134,21 @@ async function carregarInicio(resumo) {
     ['ok', 'arrow-up', 'Serviços prestados', moedaCurta(emit.totais.valor_servico), `retenções ${moedaCurta(emit.totais.valor_retencoes)}`],
     ['', 'arrow-down', 'Serviços tomados', moedaCurta(receb.totais.valor_servico), `ISS ${moedaCurta(receb.totais.valor_iss)}`],
     ['erro', 'x', 'Canceladas', numero(resumo.canceladas), 'notas com evento de cancelamento'],
+    [resumo.divergencias_bloqueantes ? 'erro' : resumo.divergencias_alertas ? 'alerta' : 'ok', 'shield', 'Conferência fiscal',
+      numero(resumo.divergencias_bloqueantes),
+      resumo.divergencias_bloqueantes || resumo.divergencias_alertas
+        ? `bloqueante(s) · ${numero(resumo.divergencias_alertas)} alerta(s)`
+        : 'nenhuma pendência'],
   ];
   $('#kpis').innerHTML = kpis
-    .map(([cls, ic, t, v, s]) => `<div class="cartao kpi ${cls}"><div class="kpi-topo"><span class="kpi-icone">${icone(ic)}</span>${t}</div><b>${esc(v)}</b><small>${esc(s)}</small></div>`)
+    .map(([cls, ic, t, v, s]) => `<div class="cartao kpi ${cls}" ${t === 'Conferência fiscal' ? 'data-ir="conferencia" role="button" tabindex="0"' : ''}><div class="kpi-topo"><span class="kpi-icone">${icone(ic)}</span>${t}</div><b>${esc(v)}</b><small>${esc(s)}</small></div>`)
     .join('');
   $('#boas-vindas').classList.toggle('oculto', resumo.empresas > 0);
 
   // Alertas
   const alertas = [];
+  if (resumo.divergencias_bloqueantes)
+    alertas.push(['erro', 'shield', `${numero(resumo.divergencias_bloqueantes)} divergência(s) fiscal(is) bloqueante(s)`, 'Retenção, alíquota ou cancelamento a conferir antes de fechar a competência. Abra “Conferência”.']);
   for (const e of empresas) {
     const d = e.dias_para_vencer;
     if (d != null && d < 0) alertas.push(['erro', 'alert', `Certificado vencido — ${e.razao_social}`, 'Cadastre o certificado novo em “Nova empresa”.']);
@@ -143,7 +156,10 @@ async function carregarInicio(resumo) {
     if (e.trava_ate && new Date(e.trava_ate) > new Date())
       alertas.push(['alerta', 'alert', `Busca pausada — ${e.razao_social}`, `Proteção contra consumo indevido até ${dataHora(e.trava_ate)}.`]);
     const ult = execucoes.find((x) => x.empresa_id === e.id && x.status !== 'executando');
-    if (ult?.status === 'erro') alertas.push(['erro', 'alert', `Última busca falhou — ${e.razao_social}`, ult.mensagem ?? '']);
+    if (ult?.status === 'erro') {
+      const info = infoStatus(ult);
+      alertas.push(['erro', 'alert', `${info.rotulo} — ${e.razao_social}`, info.acao ?? ult.mensagem ?? '']);
+    }
   }
   $('#alertas').innerHTML = alertas.length
     ? alertas.map(([c, ic, t, s]) => `<li class="${c}"><span class="ic">${icone(ic)}</span><div><b>${esc(t)}</b><span>${esc(s)}</span></div></li>`).join('')
@@ -152,7 +168,7 @@ async function carregarInicio(resumo) {
   // Últimas execuções
   const ult = execucoes.slice(0, 6);
   $('#ultimas-execucoes').innerHTML = ult.length
-    ? ult.map((x) => `<li class="${x.status}"><span class="marcador"></span><div class="texto"><b>${esc(x.empresa_nome ?? '—')}</b><span>${esc(TIPO_EXEC[x.tipo] ?? x.tipo)} · ${esc(x.status === 'executando' ? 'em andamento…' : x.mensagem ?? STATUS_EXEC[x.status])}</span></div><time>${esc(relativo(x.inicio))}</time></li>`).join('')
+    ? ult.map((x) => `<li class="${classeStatus(infoStatus(x).tipo)}"><span class="marcador"></span><div class="texto"><b>${esc(x.empresa_nome ?? '—')} · ${esc(infoStatus(x).rotulo)}</b><span>${esc(TIPO_EXEC[x.tipo] ?? x.tipo)} · ${esc(x.status === 'executando' ? 'em andamento…' : x.mensagem ?? '')}</span></div><time>${esc(relativo(x.inicio))}</time></li>`).join('')
     : '<li class="vazio-mini">Nenhuma busca ainda.</li>';
 }
 
@@ -165,6 +181,10 @@ async function carregarEmpresas() {
   const atual = sel.value;
   sel.innerHTML = '<option value="">Todas as empresas</option>' + empresas.map((e) => `<option value="${e.id}">${esc(e.razao_social)}</option>`).join('');
   sel.value = atual;
+  const selConf = $('#conf-empresa');
+  const atualConf = selConf.value;
+  selConf.innerHTML = sel.innerHTML;
+  selConf.value = atualConf;
 
   $('#lista-empresas').innerHTML = empresas.length
     ? empresas.map(cartaoEmpresa).join('')
@@ -359,6 +379,13 @@ const paramsFiltro = () => {
   return p;
 };
 
+function pontoConferencia(d) {
+  if (d.div_bloqueantes) return `<span class="conf-ponto BLOQUEANTE" title="${d.div_bloqueantes} divergência(s) bloqueante(s)">${d.div_bloqueantes}</span>`;
+  if (d.div_alertas) return `<span class="conf-ponto ALERTA" title="${d.div_alertas} alerta(s)">${d.div_alertas}</span>`;
+  if (d.div_info) return `<span class="conf-ponto INFO" title="${d.div_info} informativa(s)">${d.div_info}</span>`;
+  return d.validado_em ? `<span class="conf-ponto ok" title="Conferida sem divergências">${icone('check')}</span>` : '<span class="sub" title="Ainda não conferida">—</span>';
+}
+
 async function carregarNotas() {
   const p = paramsFiltro();
   p.set('limite', POR_PAGINA);
@@ -380,12 +407,13 @@ async function carregarNotas() {
         <td class="num col-ret">${moeda(d.valor_total_retencoes)}</td>
         <td class="num"><b>${moeda(d.valor_liquido)}</b></td>
         <td>${d.situacao === 'normal' ? '<span class="pilula ok">normal</span>' : `<span class="pilula erro">${esc(d.situacao)}</span>`}</td>
+        <td>${pontoConferencia(d)}</td>
         <td><div class="acoes">
           <button class="icone-acao" data-ver="${d.id}" title="Detalhes">${icone('search')}</button>
           <a class="icone-acao" href="/api/documentos/${d.id}/xml" title="Baixar XML">XML</a>
           <a class="icone-acao" href="/api/documentos/${d.id}/pdf" title="Baixar PDF">PDF</a>
         </div></td></tr>`).join('')
-    : '<tr><td colspan="10" class="vazio">Nenhuma nota encontrada com esses filtros.</td></tr>';
+    : '<tr><td colspan="11" class="vazio">Nenhuma nota encontrada com esses filtros.</td></tr>';
   const total = totais.quantidade;
   $('#pag-info').textContent = total ? `${numero(pagina * POR_PAGINA + 1)}–${numero(Math.min((pagina + 1) * POR_PAGINA, total))} de ${numero(total)}` : '';
   $('#pag-ant').disabled = pagina === 0;
@@ -435,6 +463,8 @@ function abrirNota(d) {
         <span class="pilula sem-ponto">competência ${dataBR(d.competencia)}</span>
       </div>
     </div>
+    ${d.divergencias?.length ? `<div class="secao-nota"><h4>Conferência fiscal</h4><div class="lista-div">${d.divergencias.map((v) => itemDivergencia({ ...v, empresa_nome: undefined })).join('')}</div></div>`
+      : `<div class="secao-nota"><h4>Conferência fiscal</h4><p class="sub">${d.validado_em ? '✓ Nenhuma divergência nas regras nacionais.' : 'Ainda não conferida.'}</p></div>`}
     <div class="secao-nota"><h4>Partes</h4>${dl([
       ['Prestador', `${esc(d.prestador_nome ?? '—')}<span class="sub">${esc(doc(d.prestador_doc))}</span>`],
       ['Tomador', `${esc(d.tomador_nome ?? '—')}<span class="sub">${esc(d.tomador_doc ? doc(d.tomador_doc) : '')}</span>`],
@@ -477,8 +507,8 @@ async function carregarExecucoes() {
   haExecutando = execucoes.some((x) => x.status === 'executando');
   $('#indicador-exec').classList.toggle('oculto', !haExecutando);
   $('#lista-execucoes').innerHTML = execucoes.length
-    ? execucoes.map((x) => `<tr>
-        <td><span class="pilula ${esc(x.status)}">${esc(STATUS_EXEC[x.status] ?? x.status)}</span></td>
+    ? execucoes.map((x) => `<tr class="clicavel" data-exec="${x.id}" title="Ver detalhes">
+        <td><span class="pilula ${classeStatus(infoStatus(x).tipo)}" title="${esc(catalogo.subcodigos[x.subcodigo] ?? '')}">${esc(infoStatus(x).rotulo)}</span></td>
         <td class="nome"><b>${esc(x.empresa_nome ?? '—')}</b></td>
         <td>${esc(TIPO_EXEC[x.tipo] ?? x.tipo)}</td>
         <td title="${esc(dataHora(x.inicio))}">${esc(relativo(x.inicio))}</td>
@@ -487,6 +517,140 @@ async function carregarExecucoes() {
         <td class="quebra">${esc(x.mensagem ?? '')}</td></tr>`).join('')
     : '<tr><td colspan="8" class="vazio">Nenhuma execução ainda. Clique em “Buscar notas” numa empresa.</td></tr>';
 }
+
+$('#lista-execucoes').addEventListener('click', async (ev) => {
+  const tr = ev.target.closest('[data-exec]');
+  if (!tr) return;
+  try {
+    const x = await api(`/api/execucoes/${tr.dataset.exec}`);
+    const info = x.catalogo ?? infoStatus(x);
+    const det = x.detalhes ?? {};
+    const lista = (itens) => `<ul class="lista-simples">${itens.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>`;
+    const v = det.validacao;
+    $('#titulo-exec').textContent = `${TIPO_EXEC[x.tipo] ?? x.tipo} · ${x.empresa_nome ?? ''}`;
+    $('#detalhe-exec').innerHTML = `
+      <div class="nota-cabecalho">
+        <span class="pilula ${classeStatus(info.tipo)}">${esc(info.rotulo)}</span>
+        ${x.subcodigo ? `<span class="pilula sem-ponto">${esc(x.subcodigo_descricao ?? x.subcodigo)}</span>` : ''}
+        <p>${esc(info.descricao ?? '')}</p>
+        ${info.acao ? `<div class="acao-sugerida"><b>O que fazer</b>${esc(info.acao)}</div>` : ''}
+      </div>
+      <div class="secao-nota"><h4>Resumo</h4><dl class="detalhe">
+        <dt>Início</dt><dd>${esc(dataHora(x.inicio))}</dd>
+        <dt>Duração</dt><dd>${esc(duracao(x.inicio, x.fim))}</dd>
+        <dt>Lotes / notas novas</dt><dd>${numero(x.lotes)} / ${numero(x.novos)}</dd>
+        <dt>Eventos novos</dt><dd>${numero(x.eventos)}</dd>
+        ${det.cursor ? `<dt>NSU</dt><dd>${numero(det.cursor.de)} → ${numero(det.cursor.ate)}</dd>` : ''}
+        ${x.lote_id ? `<dt>Lote</dt><dd><span class="chave">${esc(x.lote_id)}</span></dd>` : ''}
+        <dt>Mensagem</dt><dd>${esc(x.mensagem ?? '—')}</dd>
+      </dl></div>
+      ${v ? `<div class="secao-nota"><h4>Conferência fiscal</h4><dl class="detalhe"><dt>Notas conferidas</dt><dd>${numero(v.documentos)}</dd>
+        <dt>Abertas</dt><dd>${numero(v.abertas.BLOQUEANTE)} bloqueante(s) · ${numero(v.abertas.ALERTA)} alerta(s) · ${numero(v.abertas.INFO)} info</dd>
+        <dt>Nesta execução</dt><dd>${numero(v.novas)} nova(s) · ${numero(v.resolvidas)} resolvida(s)</dd></dl></div>` : ''}
+      ${det.documentos_com_erro?.length ? `<div class="secao-nota"><h4>Documentos com erro</h4>${lista(det.documentos_com_erro)}</div>` : ''}
+      ${det.falhas_transitorias?.length ? `<div class="secao-nota"><h4>Falhas temporárias (repetidas automaticamente)</h4>${lista(det.falhas_transitorias.map((f) => `${dataHora(f.em)} — ${f.erro} (nova tentativa em ${Math.round(f.esperaMs / 1000)}s)`))}</div>` : ''}
+      ${det.falhas?.length ? `<div class="secao-nota"><h4>Falhas</h4>${lista(det.falhas)}</div>` : ''}`;
+    $('#dlg-exec').showModal();
+  } catch (e) {
+    avisar(e.message, 'erro');
+  }
+});
+
+// Faixa do log de auditoria
+async function carregarAuditoria(mostrar = false) {
+  const v = await api('/api/auditoria/verificar');
+  const faixa = $('#faixa-auditoria');
+  faixa.classList.toggle('integra', v.integra);
+  faixa.classList.toggle('quebrada', !v.integra);
+  $('#aud-texto').textContent = v.integra
+    ? `${numero(v.total)} registro(s) · cadeia de hash íntegra ✓`
+    : `ATENÇÃO: cadeia quebrada no registro ${v.problemaEm}. ${v.motivo}`;
+  if (mostrar) avisar(v.integra ? `Auditoria íntegra: ${numero(v.total)} registro(s) conferidos.` : `Auditoria adulterada no registro ${v.problemaEm}.`, v.integra ? 'ok' : 'erro');
+}
+$('#btn-aud-verificar').addEventListener('click', () => carregarAuditoria(true).catch((e) => avisar(e.message, 'erro')));
+
+// ---------------- Conferência fiscal ----------------
+function itemDivergencia(v) {
+  const status = v.status !== 'aberta' ? `<span class="pilula ${v.status === 'resolvida' ? 'ok' : ''}">${esc(STATUS_DIV[v.status] ?? v.status)}</span>` : '';
+  const nota = v.empresa_nome !== undefined
+    ? `<div class="meta">NFS-e ${esc(v.numero ?? '—')} · ${esc(PAPEL[v.papel] ?? v.papel ?? '')} · competência ${dataBR(v.competencia).slice(3)} · ${esc(v.prestador_nome ?? '')} → ${esc(v.tomador_nome ?? '—')} · ${moeda(v.valor_servico)} · <b>${esc(v.empresa_nome)}</b></div>`
+    : '';
+  return `<article class="cartao div-item ${esc(v.severidade)}">
+    <span class="sev"></span>
+    <div>
+      <div class="div-topo"><span class="pilula ${esc(v.severidade)}">${esc(SEVERIDADE[v.severidade] ?? v.severidade)}</span><code>${esc(v.codigo)}</code>${status}</div>
+      <p>${esc(v.mensagem)}</p>
+      ${nota}
+      ${v.detalhes?.fonte_legal ? `<div class="meta">Base: ${esc(v.detalhes.fonte_legal)}</div>` : ''}
+      ${v.motivo ? `<div class="motivo">${v.status === 'ignorada' ? 'Ignorada: ' : ''}${esc(v.motivo)}</div>` : ''}
+    </div>
+    <div class="div-acoes">
+      ${nota ? `<button class="botao secundario pequeno" data-div-nota="${v.documento_id}">Ver nota</button>` : ''}
+      ${v.status === 'aberta' ? `<button class="botao secundario pequeno" data-div-ignorar="${v.id}">Ignorar…</button>` : ''}
+      ${v.status === 'ignorada' ? `<button class="botao secundario pequeno" data-div-reabrir="${v.id}">Reabrir</button>` : ''}
+    </div>
+  </article>`;
+}
+
+async function carregarConferencia() {
+  const p = new URLSearchParams();
+  for (const [k, v] of new FormData($('#filtros-conf'))) if (v) p.set(k, v);
+  p.set('limite', 300);
+  const { itens, total, contagem } = await api(`/api/divergencias?${p}`);
+  const kpi = (cls, t, v, s) => `<div class="cartao kpi ${cls}"><div class="kpi-topo"><span class="kpi-icone">${icone('shield')}</span>${t}</div><b>${numero(v)}</b><small>${s}</small></div>`;
+  $('#conf-kpis').innerHTML =
+    kpi('erro', 'Bloqueantes', contagem.BLOQUEANTE, 'resolver antes de fechar a competência') +
+    kpi('alerta', 'Alertas', contagem.ALERTA, 'conferir com o cliente ou a lei municipal') +
+    kpi('info', 'Informativas', contagem.INFO, 'para conhecimento');
+  $('#lista-divergencias').innerHTML = itens.length
+    ? itens.map(itemDivergencia).join('') + (total > itens.length ? `<p class="sub">Mostrando ${numero(itens.length)} de ${numero(total)}.</p>` : '')
+    : `<div class="cartao vazio-grande">${icone('check')}<h3>Nada por aqui</h3><p>Nenhuma divergência com esses filtros.</p></div>`;
+}
+$$('#filtros-conf input, #filtros-conf select').forEach((el) => el.addEventListener('change', () => carregarConferencia().catch((e) => avisar(e.message, 'erro'))));
+
+async function acaoDivergencia(ev) {
+  const nota = ev.target.closest('[data-div-nota]');
+  const ign = ev.target.closest('[data-div-ignorar]');
+  const reab = ev.target.closest('[data-div-reabrir]');
+  try {
+    if (nota) return abrirNota(await api(`/api/documentos/${nota.dataset.divNota}`));
+    if (ign) {
+      const motivo = prompt('Por que esta divergência pode ser ignorada? (fica registrado na auditoria)\nEx.: "Lei municipal dispensa a retenção", "Prestador imune — documento arquivado".');
+      if (motivo === null) return;
+      await api(`/api/divergencias/${ign.dataset.divIgnorar}/ignorar`, { metodo: 'POST', corpo: { motivo } });
+      avisar('Divergência ignorada. A justificativa ficou registrada na auditoria.');
+    }
+    if (reab) {
+      await api(`/api/divergencias/${reab.dataset.divReabrir}/reabrir`, { metodo: 'POST' });
+      avisar('Divergência reaberta.');
+    }
+    if (ign || reab) {
+      if ($('#dlg-nota').open) $('#dlg-nota').close();
+      atualizar();
+    }
+  } catch (e) {
+    avisar(e.message, 'erro');
+  }
+}
+$('#lista-divergencias').addEventListener('click', acaoDivergencia);
+$('#detalhe-nota').addEventListener('click', acaoDivergencia);
+
+$('#btn-revalidar').addEventListener('click', async () => {
+  try {
+    const v = await api('/api/validar', { metodo: 'POST', corpo: {} });
+    avisar(`${numero(v.documentos)} nota(s) conferida(s): ${v.novas} nova(s), ${v.resolvidas} resolvida(s). Abertas: ${v.abertas.BLOQUEANTE} bloqueante(s), ${v.abertas.ALERTA} alerta(s).`);
+    atualizar();
+  } catch (e) {
+    avisar(e.message, 'erro');
+  }
+});
+$('#btn-regras').addEventListener('click', () => {
+  $('#lista-regras').innerHTML = catalogo.regras
+    .map((r) => `<tr><td><code>${esc(r.codigo)}</code></td><td class="quebra">${esc(r.titulo)}</td><td><span class="pilula ${esc(r.severidade)}">${esc(SEVERIDADE[r.severidade])}</span></td><td class="quebra">${esc(r.fonte_legal)}</td><td>${esc(r.vigencia_inicio.split('-').reverse().join('/'))}</td></tr>`)
+    .join('');
+  $('#dlg-regras').showModal();
+});
+
 
 // ---------------- Importação em lote ----------------
 const SITUACAO_LOTE = {
@@ -671,10 +835,14 @@ async function atualizar() {
     const resumo = await api('/api/resumo');
     $('#ambiente').textContent = { producao: 'Produção', homologacao: 'Homologação' }[resumo.ambiente] ?? resumo.ambiente;
     $('#cont-notas').textContent = resumo.documentos ? numero(resumo.documentos) : '';
+    $('#cont-conferencia').textContent = resumo.divergencias_bloqueantes ? numero(resumo.divergencias_bloqueantes) : '';
+    if (!catalogo.regras.length) catalogo = await api('/api/catalogo');
     await carregarExecucoes();
     await carregarEmpresas();
     if (abaAtual === 'inicio') await carregarInicio(resumo);
     if (abaAtual === 'notas') await carregarNotas();
+    if (abaAtual === 'conferencia') await carregarConferencia();
+    if (abaAtual === 'execucoes') await carregarAuditoria();
   } catch (e) {
     avisar(e.message, 'erro');
   }

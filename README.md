@@ -138,6 +138,40 @@ npm run cli -- importar-certificados C:\Certificados --senhas senhas.csv --simul
 ```
 (sem `--simular` grava; `--senha X` vale para os que não estão na planilha)
 
+### Conferência fiscal e auditoria (fase 1 do roteiro)
+
+Depois de cada busca (ou importação), o sistema **confere as notas** contra regras nacionais do ISS e mostra o
+resultado em **Conferência** (menu lateral), na coluna **Conf.** da lista de notas e no detalhe de cada nota:
+
+| Regra | O que aponta | Severidade |
+|---|---|---|
+| `RET-001` | Serviço dos subitens do art. 6º, §2º, II da LC 116 prestado a PJ **sem ISS retido** | Bloqueante (para a tomadora) / Alerta (para a prestadora) |
+| `RET-002` | ISS retido **sem** responsabilidade prevista na LC 116 (tomador PF, subitem fora da lista) | Alerta |
+| `RET-004` | Retenção de prestador do Simples com alíquota fora de 2%–5% | Alerta |
+| `RET-005` | ISS retido de prestador **MEI** | Alerta |
+| `ALQ-001` / `ALQ-002` | Alíquota abaixo de 2% (LC 157) / acima de 5% | Alerta / Bloqueante |
+| `CMP-001` | Nota emitida meses depois da competência | Informativa (Alerta se ≥ 3 meses) |
+| `CAN-001` | Nota cancelada/substituída **depois** do mês de competência (pode exigir retificação) | Bloqueante |
+
+O robô **aponta, não decide**: cada divergência pode ser **ignorada com justificativa** (lei municipal, imunidade…)
+ou reaberta, e isso fica registrado na auditoria. Se os dados da nota mudarem, as divergências são recalculadas.
+
+**Resultado de cada busca** segue um catálogo de status (*Sucesso*, *Sucesso parcial*, *Sem movimento*,
+*Erro de autenticação*, *Portal indisponível*, *Limite de consultas*, *Exige ação*…), com o **que fazer** em cada caso
+(clique na execução para ver os detalhes).
+
+**Log de auditoria**: cadastro/renovação/exclusão de empresas, cada execução, cada lote, cada validação e cada decisão
+sobre divergências ficam num registro **somente de inclusão**, encadeado por hash (o banco bloqueia alterações e a
+verificação detecta adulteração). Em **Execuções** há o botão **Verificar integridade** e a exportação em JSON.
+
+```bash
+npm run cli -- validar                 # confere todas as notas
+npm run cli -- divergencias --regras   # catálogo de regras
+npm run cli -- divergencias -s BLOQUEANTE
+npm run cli -- auditoria verificar     # confere a cadeia de hash
+npm run cli -- auditoria exportar -o auditoria.json
+```
+
 ### Windows: busca automática diária
 
 1. Rode o `iniciar.bat` uma vez e cadastre as empresas.

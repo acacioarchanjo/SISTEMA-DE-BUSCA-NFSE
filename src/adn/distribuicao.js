@@ -6,8 +6,17 @@ import { abrirCredenciais } from '../crypto/credenciais.js';
 import { parseNfse, parseEvento, lerXml, tipoDoXml, papelDaEmpresa, EVENTOS } from '../nfse/parser.js';
 import { salvarXmlNfse, salvarXmlEvento } from '../nfse/armazenamento.js';
 import { esperar } from '../util/formatos.js';
+import { classificarErro, classificarSucesso, statusLegado, CATALOGO } from '../execucao/catalogo.js';
+import { registrarAuditoria } from '../auditoria.js';
+import { validarDocumentos } from '../fiscal/validacao.js';
+import { REGRAS_VERSAO } from '../fiscal/regras.js';
+import crypto from 'node:crypto';
 
-export class ErroTrava extends Error {}
+export const novoLoteId = () => `lote_${new Date().toISOString()}_${crypto.randomBytes(3).toString('hex')}`;
+
+export class ErroTrava extends Error {
+  name = 'ErroTrava';
+}
 
 /**
  * Grava uma NFS-e (XML) para a empresa. Devolve true se for documento novo.
@@ -71,6 +80,7 @@ export async function sincronizarEmpresa(repo, empresaId, opcoes = {}) {
     intervaloMs = config.adn.intervaloLotesMs,
     maxLotes = config.adn.maxLotesPorExecucao,
     dataDir = config.dataDir,
+    loteId = null,
   } = opcoes;
 
   const empresa = repo.obterEmpresa(empresaId);
@@ -83,12 +93,45 @@ export async function sincronizarEmpresa(repo, empresaId, opcoes = {}) {
   }
   if (repo.execucaoEmAndamento(empresaId)) throw new ErroTrava('Já existe uma busca em andamento para esta empresa.');
 
-  const execId = repo.iniciarExecucao(empresaId, 'busca_adn');
-  const estado = { execucaoId: execId, lotes: 0, novos: 0, eventos: 0, ignorados: 0, erros: [], ultimoNsu: repo.obterCursor(empresaId) };
+  const execId = repo.iniciarExecucao(empresaId, 'busca_adn', { loteId });
+  const inicio = Date.now();
+  const nsuInicial = repo.obterCursor(empresaId);
+  const estado = { execucaoId: execId, lotes: 0, novos: 0, eventos: 0, ignorados: 0, erros: [], ultimoNsu: nsuInicial, falhasTransitorias: [] };
   let cliente;
+
+  // Registro de auditoria da execução (seção 12 da arquitetura). Nunca inclui segredos.
+  const auditar = (codigo, subcodigo, mensagem, validacao) =>
+    registrarAuditoria(repo.db, {
+      tipo: 'execucao.finalizada',
+      empresaCnpj: empresa.cnpj,
+      execucaoId: execId,
+      loteId,
+      payload: {
+        execucao_id: execId,
+        lote_id: loteId,
+        rotina: 'busca_adn',
+        conector: 'adn-nacional@1.0.0',
+        metodo: 'API',
+        empresa: { cnpj: empresa.cnpj, razao_social: empresa.razao_social },
+        status: codigo,
+        subcodigo,
+        mensagem,
+        duracao_ms: Date.now() - inicio,
+        cursor: { tipo: 'NSU', de: nsuInicial, ate: estado.ultimoNsu },
+        lotes: estado.lotes,
+        notas_novas: estado.novos,
+        eventos_novos: estado.eventos,
+        ignorados: estado.ignorados,
+        documentos_com_erro: estado.erros,
+        falhas_transitorias: estado.falhasTransitorias,
+        validacao: validacao ?? null,
+        regras_versao: validacao ? REGRAS_VERSAO : null,
+      },
+    });
 
   try {
     cliente = criarCliente(abrirCredenciais(repo, empresaId));
+    cliente.aoRetentar = (f) => estado.falhasTransitorias.push(f);
 
     while (estado.lotes < maxLotes) {
       const cursor = repo.obterCursor(empresaId);
@@ -128,45 +171,91 @@ export async function sincronizarEmpresa(repo, empresaId, opcoes = {}) {
       if (intervaloMs > 0) await esperar(intervaloMs);
     }
 
+    // Conferência fiscal das notas da empresa (regras da fase 1).
+    let validacao = null;
+    try {
+      validacao = validarDocumentos(repo, { empresaId, dataDir });
+    } catch (e) {
+      estado.erros.push(`validação fiscal: ${e.message}`);
+    }
+
+    const { codigo, subcodigo } = classificarSucesso(estado);
+    const div = validacao?.abertas;
     const msg =
       `${estado.novos} nota(s) nova(s), ${estado.eventos} evento(s), ${estado.lotes} lote(s).` +
+      (div && (div.BLOQUEANTE || div.ALERTA) ? ` Conferência: ${div.BLOQUEANTE} bloqueante(s), ${div.ALERTA} alerta(s).` : '') +
       (estado.erros.length ? ` ${estado.erros.length} documento(s) com erro: ${estado.erros.slice(0, 5).join(' | ')}` : '');
-    repo.atualizarExecucao(execId, { status: 'ok', mensagem: msg, finalizar: true, lotes: estado.lotes, novos: estado.novos, eventos: estado.eventos, ultimo_nsu: estado.ultimoNsu });
-    return { ...estado, status: 'ok', mensagem: msg };
+    repo.atualizarExecucao(execId, {
+      status: statusLegado(codigo), codigo, subcodigo, mensagem: msg, finalizar: true,
+      lotes: estado.lotes, novos: estado.novos, eventos: estado.eventos, ultimo_nsu: estado.ultimoNsu,
+      detalhes: { documentos_com_erro: estado.erros, falhas_transitorias: estado.falhasTransitorias, validacao, cursor: { de: nsuInicial, ate: estado.ultimoNsu } },
+    });
+    auditar(codigo, subcodigo, msg, validacao);
+    return { ...estado, status: statusLegado(codigo), codigo, subcodigo, mensagem: msg, validacao };
   } catch (e) {
-    let status = 'erro';
-    if (e instanceof ErroAdn && e.consumoIndevido) {
+    const { codigo, subcodigo } = classificarErro(e);
+    if (codigo === 'LIMITE_CONSUMO' && e instanceof ErroAdn) {
       const ate = new Date(Date.now() + config.adn.travaMinutos * 60_000).toISOString();
       repo.definirTrava(empresaId, ate);
-      status = 'travada';
     }
+    const acao = CATALOGO[codigo]?.acao;
     repo.atualizarExecucao(execId, {
-      status,
+      status: statusLegado(codigo),
+      codigo,
+      subcodigo,
       mensagem: e.message,
       finalizar: true,
       lotes: estado.lotes,
       novos: estado.novos,
       eventos: estado.eventos,
       ultimo_nsu: estado.ultimoNsu,
+      detalhes: { documentos_com_erro: estado.erros, falhas_transitorias: estado.falhasTransitorias, acao_sugerida: acao ?? null, cursor: { de: nsuInicial, ate: estado.ultimoNsu } },
     });
-    e.estado = { ...estado, status };
+    try { auditar(codigo, subcodigo, e.message, null); } catch { /* auditoria não pode esconder o erro original */ }
+    e.estado = { ...estado, status: statusLegado(codigo), codigo, subcodigo };
+    e.codigo = codigo;
+    e.subcodigo = subcodigo;
     throw e;
   } finally {
     cliente?.fechar?.();
   }
 }
 
-/** Sincroniza todas as empresas ativas, em sequência (uma por vez, sem paralelismo). */
+/**
+ * Sincroniza todas as empresas ativas, em sequência (uma por vez, sem paralelismo),
+ * e grava o registro de auditoria do lote.
+ */
 export async function sincronizarTodas(repo, opcoes = {}) {
+  const loteId = opcoes.loteId ?? novoLoteId();
+  const iniciado = new Date();
   const resultados = [];
   for (const emp of repo.listarEmpresas({ somenteAtivas: true })) {
     try {
-      const r = await sincronizarEmpresa(repo, emp.id, opcoes);
-      resultados.push({ empresa: emp.razao_social, ok: true, mensagem: r.mensagem });
+      const r = await sincronizarEmpresa(repo, emp.id, { ...opcoes, loteId });
+      resultados.push({ empresa: emp.razao_social, cnpj: emp.cnpj, ok: true, codigo: r.codigo, mensagem: r.mensagem, novos: r.novos, eventos: r.eventos, validacao: r.validacao?.abertas ?? null });
     } catch (e) {
-      resultados.push({ empresa: emp.razao_social, ok: false, mensagem: e.message });
+      const c = e.codigo ? { codigo: e.codigo, subcodigo: e.subcodigo } : classificarErro(e);
+      resultados.push({ empresa: emp.razao_social, cnpj: emp.cnpj, ok: false, ...c, mensagem: e.message, novos: e.estado?.novos ?? 0, eventos: e.estado?.eventos ?? 0 });
     }
   }
+  const porStatus = {};
+  for (const r of resultados) porStatus[r.codigo] = (porStatus[r.codigo] ?? 0) + 1;
+  const soma = (k) => resultados.reduce((t, r) => t + (r[k] ?? 0), 0);
+  const divergencias = { BLOQUEANTE: 0, ALERTA: 0, INFO: 0 };
+  for (const r of resultados) for (const k in divergencias) divergencias[k] += r.validacao?.[k] ?? 0;
+  registrarAuditoria(repo.db, {
+    tipo: 'lote.finalizado',
+    loteId,
+    payload: {
+      lote_id: loteId,
+      disparo: opcoes.disparo ?? { origem: 'manual' },
+      iniciado_em: iniciado.toISOString(),
+      finalizado_em: new Date().toISOString(),
+      duracao_ms: Date.now() - iniciado.getTime(),
+      resumo: { empresas: resultados.length, status: porStatus, notas_novas: soma('novos'), eventos_novos: soma('eventos'), divergencias_abertas: divergencias },
+      empresas: resultados.map(({ empresa, cnpj, codigo, subcodigo, mensagem }) => ({ empresa, cnpj, status: codigo, subcodigo: subcodigo ?? null, mensagem })),
+    },
+  });
   return resultados;
 }
 

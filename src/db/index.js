@@ -83,6 +83,42 @@ CREATE TABLE IF NOT EXISTS eventos (
   UNIQUE (empresa_id, chave, tipo_evento, nsu)
 );
 
+-- Divergências fiscais encontradas pelo motor de regras (src/fiscal/)
+CREATE TABLE IF NOT EXISTS divergencias (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  empresa_id       INTEGER NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+  documento_id     INTEGER NOT NULL REFERENCES documentos(id) ON DELETE CASCADE,
+  codigo           TEXT NOT NULL,           -- RET-001, ALQ-001...
+  severidade       TEXT NOT NULL,           -- BLOQUEANTE | ALERTA | INFO
+  mensagem         TEXT NOT NULL,
+  detalhes         TEXT,                    -- JSON
+  competencia      TEXT,
+  status           TEXT NOT NULL DEFAULT 'aberta', -- aberta | resolvida | ignorada
+  motivo           TEXT,                    -- justificativa de quem ignorou / motivo da resolução
+  regras_versao    TEXT,
+  criado_em        TEXT NOT NULL DEFAULT (datetime('now')),
+  atualizado_em    TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (documento_id, codigo)
+);
+CREATE INDEX IF NOT EXISTS ix_div_empresa ON divergencias(empresa_id, status, severidade);
+
+-- Log de auditoria append-only, encadeado por hash (src/auditoria.js)
+CREATE TABLE IF NOT EXISTS auditoria (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  criado_em      TEXT NOT NULL,
+  tipo           TEXT NOT NULL,
+  empresa_cnpj   TEXT,
+  execucao_id    INTEGER,
+  lote_id        TEXT,
+  payload        TEXT NOT NULL,
+  hash_anterior  TEXT NOT NULL,
+  hash_registro  TEXT NOT NULL UNIQUE
+);
+CREATE TRIGGER IF NOT EXISTS auditoria_sem_update BEFORE UPDATE ON auditoria
+BEGIN SELECT RAISE(ABORT, 'auditoria: registros não podem ser alterados'); END;
+CREATE TRIGGER IF NOT EXISTS auditoria_sem_delete BEFORE DELETE ON auditoria
+BEGIN SELECT RAISE(ABORT, 'auditoria: registros não podem ser apagados'); END;
+
 CREATE TABLE IF NOT EXISTS execucoes (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   empresa_id  INTEGER REFERENCES empresas(id) ON DELETE CASCADE,
@@ -105,12 +141,46 @@ export function abrirBanco(arquivo = config.dbPath) {
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
   db.exec(ESQUEMA);
+  migrar(db);
   // Execuções interrompidas (processo morto) não ficam "executando" para sempre.
   db.prepare(
-    `UPDATE execucoes SET status='erro', fim=datetime('now'), mensagem='Interrompida (processo encerrado)'
+    `UPDATE execucoes SET status='erro', codigo='CANCELADO', subcodigo='INTERROMPIDA', fim=datetime('now'),
+       mensagem='Interrompida (o sistema foi encerrado durante a busca). Rode de novo: continua de onde parou.'
      WHERE status='executando'`,
   ).run();
   return db;
+}
+
+// Colunas acrescentadas depois da primeira versão: bancos antigos são atualizados ao abrir.
+const COLUNAS_NOVAS = {
+  execucoes: {
+    codigo: 'TEXT',        // catálogo de status (src/execucao/catalogo.js)
+    subcodigo: 'TEXT',
+    detalhes: 'TEXT',      // JSON: documentos com erro, falhas transitórias etc.
+    lote_id: 'TEXT',
+  },
+  documentos: {
+    prestador_regime: 'TEXT',            // opSimpNac: 1 não optante | 2 MEI | 3 ME/EPP
+    tp_ret_issqn: 'TEXT',                // 1 não retido | 2 retido pelo tomador | 3 retido pelo intermediário
+    codigo_municipio_incidencia: 'TEXT',
+    validado_em: 'TEXT',
+  },
+};
+
+function migrar(db) {
+  for (const [tabela, colunas] of Object.entries(COLUNAS_NOVAS)) {
+    const existentes = new Set(db.prepare(`PRAGMA table_info(${tabela})`).all().map((c) => c.name));
+    for (const [coluna, tipo] of Object.entries(colunas)) {
+      if (!existentes.has(coluna)) db.exec(`ALTER TABLE ${tabela} ADD COLUMN ${coluna} ${tipo}`);
+    }
+  }
+  // Execuções antigas, anteriores ao catálogo: deriva um código aproximado.
+  db.exec(`UPDATE execucoes SET codigo = CASE status
+             WHEN 'ok' THEN CASE WHEN COALESCE(novos,0)=0 AND COALESCE(eventos,0)=0 THEN 'SEM_MOVIMENTO' ELSE 'SUCESSO' END
+             WHEN 'travada' THEN 'LIMITE_CONSUMO'
+             WHEN 'executando' THEN 'EM_EXECUCAO'
+             ELSE 'ERRO_INTERNO' END
+           WHERE codigo IS NULL`);
 }
 
 let instancia = null;
