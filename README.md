@@ -142,7 +142,7 @@ npm run cli -- exportar --mes 2026-03 --pdf               # ZIP do mês com XMLs
 npm run cli -- exportar --csv -e 1 -o marco.csv          # só a planilha
 npm run cli -- conciliar 1 --de 2026-03-01 --ate 2026-03-31       # (experimental) confere com o portal
 npm run cli -- agendar                                   # fica rodando conforme NFSE_ADN_CRON
-npm run cli -- backup --destino E:\\Backups              # ZIP com banco, XMLs, logs e .env
+npm run cli -- backup --destino E:\Backups               # ZIP com banco, XMLs, logs e .env
 ```
 
 ### Como a busca funciona
