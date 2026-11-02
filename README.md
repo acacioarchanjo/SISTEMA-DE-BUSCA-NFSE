@@ -252,6 +252,37 @@ npm run cli -- auditoria exportar -o auditoria.json
 - Também funciona com OneDrive, Dropbox ou uma pasta de rede. Também dá para configurar pelo `.env` com `NFSE_PASTA_DRIVE`.
 - ⚠️ Os XMLs têm dados fiscais de clientes. Compartilhe a pasta no Drive só com quem precisa (LGPD).
 
+### Apuração e encerramento do ISS (Campinas primeiro)
+
+A tela **Apuração ISS** cobre o fechamento do mês, da apuração ao pagamento:
+
+- **Apuração por empresa × município × competência**:
+  - **ISS próprio** = notas prestadas normais, com incidência no município e sem retenção. Se a empresa é do Simples
+    Nacional (detectado pelo `opSimpNac` das próprias notas), esse ISS vai no DAS e não gera guia municipal.
+  - **ISS retido** = notas tomadas com retenção pelo tomador (`tpRetISSQN` 2), com resumo por prestador.
+  - Ficam fora da conta, apenas como informação: retenção feita pelo intermediário, prestadas com ISS retido pelo
+    cliente, canceladas e substituídas. Os valores também aparecem separados por alíquota.
+- **Pendências**:
+  - BLOQUEANTE: divergências bloqueantes na Conferência; busca no ADN ou na prefeitura que ainda não rodou depois do
+    fim do mês; competência ainda não terminada.
+  - ALERTA: notas sem município de incidência; prestador de fora com ISS devido ao município e sem retenção
+    (em Campinas, a "NFS-e Campinas – Tomador").
+- **Fluxo com aprovação humana**: Apuração → Aprovada → Encerrada no portal → Guia emitida → Paga.
+  - Na aprovação, os valores ficam congelados com **hash SHA-256**. Se uma nota chegar ou mudar depois, a competência
+    fica **desatualizada** e precisa ser reaberta, com motivo. Depois do encerramento, isso indica retificação no portal.
+  - Aprovar com pendência bloqueante exige justificativa.
+  - Cada etapa entra no log de auditoria encadeado.
+- **Conferência da guia pelo código de barras** (padrão FEBRABAN):
+  - arrecadação: 48 dígitos, segmento 1 = prefeituras, módulo 10 ou 11 por bloco e DV geral;
+  - boleto bancário: 47 dígitos, com o fator de vencimento já considerando o reinício de 22/02/2025.
+  - O valor lido do código é comparado com o apurado. Diferença exige justificativa (multa, juros).
+  - PDFs da guia e do comprovante são guardados e, se configurado, copiados para `Guias/` no Google Drive.
+- **Limites (de propósito)**:
+  - O webservice de Campinas (ABRASF 2.03) **não tem** operação de encerramento nem de guia. Isso é feito no portal
+    NFSe Campinas, onde a **GRD** é gerada.
+  - O sistema **não encerra, não emite e não paga**: ele calcula, confere e registra.
+  - O vencimento vem do código de barras (boleto) ou é digitado: não há dia fixo no código.
+
 ### Windows: busca automática diária
 
 1. Rode o `iniciar.bat` uma vez e cadastre as empresas.

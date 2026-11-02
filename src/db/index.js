@@ -158,6 +158,24 @@ CREATE TABLE IF NOT EXISTS execucoes (
   mensagem    TEXT
 );
 
+-- Apuração do ISS por empresa × município × competência e o fluxo até o pagamento (com aprovação humana)
+CREATE TABLE IF NOT EXISTS competencias_iss (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  empresa_id          INTEGER NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+  ibge                TEXT NOT NULL,
+  competencia         TEXT NOT NULL,             -- AAAA-MM
+  status              TEXT NOT NULL,             -- APROVADA | ENCERRADA | GUIA_EMITIDA | PAGA
+  apuracao            TEXT NOT NULL,             -- JSON da apuração aprovada (snapshot)
+  hash                TEXT NOT NULL,             -- SHA-256 do snapshot (detecta nota que chegou depois)
+  aprovado_por        TEXT NOT NULL,
+  aprovado_em         TEXT NOT NULL,
+  justificativa       TEXT,                      -- obrigatória se aprovada com pendência bloqueante
+  encerramento        TEXT,                      -- JSON { protocolo, data, por, observacao }
+  guias               TEXT NOT NULL DEFAULT '[]',-- JSON [{ tipo, valor, vencimento, codigoBarras, linhaDigitavel, arquivo, pagamento }]
+  atualizado_em       TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (empresa_id, ibge, competencia)
+);
+
 -- Preferências gravadas pelo painel (ex.: pasta do Google Drive)
 CREATE TABLE IF NOT EXISTS configuracoes (
   chave         TEXT PRIMARY KEY,

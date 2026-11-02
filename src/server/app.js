@@ -24,6 +24,8 @@ import { ErroParser } from '../nfse/parser.js';
 import { consolidarRetencoes, gerarCsvRetencoes, FILTROS_RETENCAO } from '../fiscal/retencoes.js';
 import { gerarPacoteDominio } from '../exportador/dominio.js';
 import { lerPreferencias, salvarPreferencias, sincronizarEspelho, ErroEspelho } from '../espelho/drive.js';
+import { estadoCompetencia, aprovar, reabrir, registrarEncerramento, registrarGuia, registrarPagamento, visaoGeral, ErroFluxo } from '../apuracao/fluxo.js';
+import { analisarBoleto } from '../apuracao/boleto.js';
 
 const PUBLICO = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 // Módulos usados tanto pelo servidor/CLI quanto pelo navegador (mesma regra nos dois lados).
@@ -93,6 +95,17 @@ const filtrosDe = (q) => ({
 });
 
 const hoje = () => new Date().toISOString().slice(0, 10);
+
+/** Identificação da competência (query ou corpo): empresa, município (IBGE) e mês AAAA-MM. */
+function alvoCompetencia(o) {
+  const empresaId = Number(o.empresa);
+  const ibge = String(o.ibge ?? '');
+  const competencia = String(o.competencia ?? '');
+  if (!empresaId || !/^\d{7}$/.test(ibge) || !/^\d{4}-(0[1-9]|1[0-2])$/.test(competencia)) {
+    throw new ErroHttp(400, 'Informe empresa, município (IBGE de 7 dígitos) e competência (AAAA-MM).');
+  }
+  return { empresaId, ibge, competencia };
+}
 
 /** Filtro do relatório de retenções: empresa e meses AAAA-MM (400 se o formato for inválido). */
 function filtroRetencoes(q) {
@@ -371,6 +384,46 @@ export function criarServidor(repo, opcoes = {}) {
         }
       });
       json(res, 202, { ok: true, mensagem: 'Copiando as notas para a pasta do Google Drive…' });
+    }],
+
+    ['GET', /^\/api\/apuracao\/visao$/, (req, res, _, q) => json(res, 200, visaoGeral(repo.db, { meses: Math.min(Number(q.get('meses')) || 3, 12) }))],
+
+    ['GET', /^\/api\/apuracao$/, (req, res, _, q) => {
+      const alvo = alvoCompetencia(Object.fromEntries(q));
+      empresaOu404(alvo.empresaId);
+      json(res, 200, estadoCompetencia(repo.db, alvo));
+    }],
+
+    ['GET', /^\/api\/apuracao\/boleto$/, (req, res, _, q) => {
+      try {
+        json(res, 200, { ok: true, ...analisarBoleto(q.get('linha') ?? '') });
+      } catch (e) {
+        json(res, 200, { ok: false, erro: e.message });
+      }
+    }],
+
+    ['GET', /^\/api\/apuracao\/arquivo$/, (req, res, _, q) => {
+      const alvo = alvoCompetencia(Object.fromEntries(q));
+      const est = estadoCompetencia(repo.db, alvo);
+      const g = est.registro?.guias.find((x) => x.tipo === q.get('tipo'));
+      const rel = q.get('qual') === 'comprovante' ? g?.pagamento?.comprovante : g?.arquivo;
+      if (!rel) throw new ErroHttp(404, 'Arquivo não encontrado.');
+      const abs = path.resolve(dataDir, rel);
+      if (!abs.startsWith(path.resolve(dataDir) + path.sep)) throw new ErroHttp(400, 'Caminho inválido.');
+      arquivo(res, fs.readFileSync(abs), 'application/pdf', path.basename(abs));
+    }],
+
+    ['POST', /^\/api\/apuracao\/(aprovar|reabrir|encerramento|guia|pagamento)$/, async (req, res, [acao]) => {
+      const b = await lerCorpo(req);
+      const alvo = alvoCompetencia(b);
+      empresaOu404(alvo.empresaId);
+      const fn = { aprovar, reabrir, encerramento: registrarEncerramento, guia: registrarGuia, pagamento: registrarPagamento }[acao];
+      try {
+        json(res, 200, fn(repo.db, alvo, b, { dataDir }));
+      } catch (e) {
+        if (e instanceof ErroFluxo) throw new ErroHttp(e.status, e.message);
+        throw e;
+      }
     }],
 
     ['GET', /^\/api\/catalogo$/, (req, res) => json(res, 200, { status: CATALOGO, subcodigos: SUBCODIGOS, regras: catalogoRegras() })],

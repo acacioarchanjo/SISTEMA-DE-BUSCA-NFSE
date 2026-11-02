@@ -19,6 +19,17 @@ export const MUNICIPIOS_CONHECIDOS = {
       'NFS-e Campinas (sistema IMA), padrão ABRASF 2.03. Exige certificado ICP-Brasil e consulta assinada; elementos sem namespace ' +
       '(XSD do padrão "DSF" de Campinas). Campinas também publicou uma API no padrão nacional (nfseapi.campinas.sp.gov.br): ' +
       'se as notas já chegam pelo ADN, a conferência sinaliza duplicidade (DUP-001).',
+    // Obrigações do ISS no município (usadas na apuração/encerramento). Sem webservice: tudo é feito no portal.
+    fiscal: {
+      portal: 'https://novanfse.campinas.sp.gov.br',
+      guia: 'GRD — Guia de Recolhimento Digital, gerada no sistema NFSe Campinas',
+      declaracaoTomador:
+        'Serviços tomados acobertados por NFS-e Campinas são escriturados automaticamente; serviços de prestadores ' +
+        'de fora do município são declarados com a "NFS-e Campinas – Tomador".',
+      vencimento: null, // não confirmado: o vencimento é lido da própria guia (código de barras) ou digitado
+      encerramentoPorWebservice: false,
+      guiaPorWebservice: false,
+    },
     fontes: [
       'Unimake DFe — Servicos/Config/NFSe/CampinasSP.xml (envelope), Xml/Schemas/NFSe/DSF/nfse.xsd (Signature obrigatória, sem namespace)',
       'Unimake DFe — Unimake.DFe.Test/NFSe/Resources/DSF/2.03/ConsultarNfseServicoPrestadoEnvio-ped-sitnfse.xml',

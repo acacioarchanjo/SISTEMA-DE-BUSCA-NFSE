@@ -135,6 +135,8 @@ export function parseNfse(xml) {
     municipio_emissao: campo(inf, 'xLocEmi') ?? null,
     municipio_incidencia: campo(inf, 'xLocIncid') ?? null,
     codigo_municipio_incidencia: campo(inf, 'cLocIncid') ?? null,
+    // município do prestador (local de emissão): usado na apuração para identificar prestador de fora
+    municipio_gerador: campo(inf, 'cLocEmi') ?? campo(infDps, 'cLocEmi') ?? null,
     prestador_doc: docDe(prest) ?? docDe(emit),
     prestador_nome: campo(emit, 'xNome') ?? campo(prest, 'xNome') ?? null,
     prestador_im: campo(emit, 'IM') ?? campo(prest, 'IM') ?? null,
