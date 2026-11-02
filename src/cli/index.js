@@ -12,6 +12,7 @@ import { gerarZip } from '../exportador/zip.js';
 import { gerarCsv } from '../exportador/planilha.js';
 import { iniciarAgendador } from '../agendador.js';
 import { gerarBackup } from '../backup.js';
+import { restaurarBackup, listarBackups, analisarBackup } from '../restaurar.js';
 import { formatarCnpj, somenteDigitos } from '../util/formatos.js';
 
 const repo = () => new Repositorio(obterBanco());
@@ -193,6 +194,48 @@ programa
     console.log(`✔ Backup gerado: ${r.arquivo} (${mb} MB, ${r.arquivos} arquivo(s))`);
     if (!r.incluiuEnv) console.log('⚠ O .env NÃO foi incluído: guarde a NFSE_MASTER_KEY em local seguro.');
     if (r.removidos.length) console.log(`  ${r.removidos.length} backup(s) antigo(s) removido(s).`);
+  });
+
+const PASTA_BACKUPS = path.resolve('backups');
+
+programa
+  .command('backups')
+  .description('lista os backups da pasta ./backups (mais novo primeiro)')
+  .option('-d, --pasta <pasta>', 'outra pasta de backups', PASTA_BACKUPS)
+  .action((o) => {
+    const lista = listarBackups(o.pasta);
+    if (!lista.length) return console.log(`Nenhum backup encontrado em ${o.pasta}`);
+    lista.forEach((b, i) => console.log(`  [${i + 1}] ${b.nome}  (${(b.tamanho / 1024 / 1024).toFixed(1)} MB)`));
+  });
+
+programa
+  .command('restaurar <backup>')
+  .description('restaura um backup (caminho do ZIP ou número da lista "backups"); exige --sim')
+  .option('--sim', 'confirma a restauração (sem isso, só mostra o que seria feito)')
+  .action(async (ref, o) => {
+    let arquivo = ref;
+    if (/^\d+$/.test(ref) && !fs.existsSync(ref)) {
+      const item = listarBackups(PASTA_BACKUPS)[Number(ref) - 1];
+      if (!item) throw new Error(`Não existe o backup número ${ref} em ${PASTA_BACKUPS}`);
+      arquivo = item.arquivo;
+    }
+    const plano = await analisarBackup(arquivo);
+    console.log(`Backup: ${arquivo}`);
+    console.log(`  ${plano.dados.length + 1} arquivo(s) de dados; .env ${plano.env !== null ? 'incluído' : 'NÃO incluído'}`);
+    if (!o.sim) {
+      console.log('Nada foi alterado. Para restaurar de verdade, repita com --sim.');
+      process.exitCode = 2;
+      return;
+    }
+    const r = await restaurarBackup(arquivo);
+    console.log(`✔ Restaurado: ${r.empresas} empresa(s), ${r.documentos} nota(s).`);
+    if (r.dataAnterior) console.log(`  Dados anteriores preservados em: ${r.dataAnterior}`);
+    if (r.envAnterior) console.log(`  .env anterior preservado em: ${r.envAnterior}`);
+    if (r.certificadosSemChave.length) {
+      console.log(`⚠ A NFSE_MASTER_KEY atual NÃO abre o certificado de: ${r.certificadosSemChave.join(', ')}.`);
+      console.log('  Coloque no .env a chave da época do backup, ou cadastre esses certificados de novo no painel.');
+      process.exitCode = 3;
+    }
   });
 
 programa

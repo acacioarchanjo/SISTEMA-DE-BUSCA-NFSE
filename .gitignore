@@ -26,3 +26,6 @@ tmp/
 exportacoes/
 # Backups gerados (contêm banco, XMLs e a chave mestra)
 backups/
+# Cópias de segurança feitas pela restauração (dados de clientes e chave mestra)
+data-antes-restauracao-*/
+.env.antes-restauracao-*
