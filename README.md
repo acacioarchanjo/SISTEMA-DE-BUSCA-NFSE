@@ -55,7 +55,8 @@ Um robô **100% local** que baixa automaticamente as **NFS-e (Notas Fiscais de S
 ## 🚀 Como rodar
 
 Requisitos: **Node.js 22 ou mais novo** (22, 24 e 26 funcionam; o banco `better-sqlite3` 13 já vem compilado
-para Windows, Linux e macOS, sem precisar de Visual Studio).
+para Windows, Linux e macOS, sem precisar de Visual Studio). O `.npmrc` do projeto (`ignore-scripts=true`)
+impede que o npm 11 tente recompilá-lo.
 
 ```bash
 # 1) instalar dependências
