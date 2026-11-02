@@ -24,3 +24,5 @@ tmp/
 
 # Exportações geradas (contêm dados de clientes)
 exportacoes/
+# Backups gerados (contêm banco, XMLs e a chave mestra)
+backups/
