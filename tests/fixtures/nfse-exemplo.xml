@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<NFSe versao="1.00" xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infNFSe Id="NFS35503082112223330001810000000000001226030000000001">
+    <xLocEmi>São Paulo</xLocEmi>
+    <xLocPrestacao>São Paulo</xLocPrestacao>
+    <nNFSe>12</nNFSe>
+    <cLocIncid>3550308</cLocIncid>
+    <xLocIncid>São Paulo</xLocIncid>
+    <xTribNac>Análise e desenvolvimento de sistemas.</xTribNac>
+    <verAplic>SefinNac_1.0</verAplic>
+    <ambGer>2</ambGer>
+    <tpEmis>1</tpEmis>
+    <procEmi>1</procEmi>
+    <cStat>100</cStat>
+    <dhProc>2026-03-15T10:05:00-03:00</dhProc>
+    <nDFSe>987654</nDFSe>
+    <emit>
+      <CNPJ>11222333000181</CNPJ>
+      <IM>12345</IM>
+      <xNome>EMPRESA TESTE LTDA</xNome>
+    </emit>
+    <valores>
+      <vBC>10000.00</vBC>
+      <pAliqAplic>2.00</pAliqAplic>
+      <vISSQN>200.00</vISSQN>
+      <vTotalRet>815.00</vTotalRet>
+      <vLiq>9185.00</vLiq>
+    </valores>
+    <DPS versao="1.00">
+      <infDPS Id="DPS355030821122233300018100900000000000000012">
+        <tpAmb>2</tpAmb>
+        <dhEmi>2026-03-15T10:00:00-03:00</dhEmi>
+        <verAplic>ERP 1.0</verAplic>
+        <serie>900</serie>
+        <nDPS>12</nDPS>
+        <dCompet>2026-03-15</dCompet>
+        <tpEmit>1</tpEmit>
+        <cLocEmi>3550308</cLocEmi>
+        <prest>
+          <CNPJ>11222333000181</CNPJ>
+          <IM>12345</IM>
+          <regTrib><opSimpNac>1</opSimpNac><regEspTrib>0</regEspTrib></regTrib>
+        </prest>
+        <toma>
+          <CNPJ>04252011000110</CNPJ>
+          <xNome>CLIENTE TOMADOR S.A.</xNome>
+        </toma>
+        <serv>
+          <locPrest><cLocPrestacao>3550308</cLocPrestacao></locPrest>
+          <cServ>
+            <cTribNac>010101</cTribNac>
+            <xDescServ>Desenvolvimento de software sob encomenda - março/2026</xDescServ>
+            <cNBS>115013000</cNBS>
+          </cServ>
+        </serv>
+        <valores>
+          <vServPrest><vServ>10000.00</vServ></vServPrest>
+          <trib>
+            <tribMun>
+              <tribISSQN>1</tribISSQN>
+              <tpRetISSQN>1</tpRetISSQN>
+              <pAliq>2.00</pAliq>
+            </tribMun>
+            <tribFed>
+              <piscofins>
+                <CST>01</CST>
+                <vBCPisCofins>10000.00</vBCPisCofins>
+                <pAliqPis>0.65</pAliqPis>
+                <pAliqCofins>3.00</pAliqCofins>
+                <vPis>65.00</vPis>
+                <vCofins>300.00</vCofins>
+                <tpRetPisCofins>1</tpRetPisCofins>
+              </piscofins>
+              <vRetCP>0.00</vRetCP>
+              <vRetIRRF>150.00</vRetIRRF>
+              <vRetCSLL>100.00</vRetCSLL>
+            </tribFed>
+            <totTrib><indTotTrib>0</indTotTrib></totTrib>
+          </trib>
+        </valores>
+      </infDPS>
+    </DPS>
+  </infNFSe>
+</NFSe>
