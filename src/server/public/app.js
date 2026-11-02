@@ -917,6 +917,67 @@ $('#btn-encerrar').addEventListener('click', async () => {
 });
 
 // ---------------- Ciclo ----------------
+// ---------------- Google Drive (pasta espelho) ----------------
+let driveTimer = null;
+function statusDrive(p) {
+  const u = p.ultimo;
+  $('#drive-ponto').classList.toggle('oculto', !(p.pasta && u && (u.erro || u.total_erros)));
+  const el = $('#drive-status');
+  el.className = 'drive-status';
+  if (p.rodando) { el.textContent = 'Copiando as notas para o Google Drive…'; return; }
+  if (!u) { el.textContent = p.pasta ? 'Ainda não copiado. Clique em “Copiar agora”.' : ''; return; }
+  const quando = new Date(u.em).toLocaleString('pt-BR');
+  if (u.erro) {
+    el.classList.add('erro');
+    el.innerHTML = `<b>Falhou em ${esc(quando)}:</b> ${esc(u.erro)}`;
+    return;
+  }
+  el.classList.add(u.total_erros ? 'erro' : 'ok');
+  el.innerHTML = `<b>Última cópia: ${esc(quando)}</b> (${u.origem === 'manual' ? 'manual' : 'depois da busca'}): ` +
+    `${numero(u.novos)} nova(s), ${numero(u.atualizados)} atualizada(s), ${numero(u.movidos)} movida(s) para Canceladas, ` +
+    `${numero(u.iguais ?? 0)} sem mudança${u.pdfs ? `, ${numero(u.pdfs)} PDF(s)` : ''}.` +
+    (u.total_erros ? `<ul>${u.erros.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '');
+}
+async function carregarDrive() {
+  const p = await api('/api/espelho');
+  statusDrive(p);
+  clearTimeout(driveTimer);
+  if (p.rodando && $('#dlg-drive').open) driveTimer = setTimeout(() => carregarDrive().catch(() => {}), 2000);
+  return p;
+}
+$('#btn-drive').addEventListener('click', async () => {
+  try {
+    const p = await carregarDrive();
+    const f = $('#form-drive');
+    f.pasta.value = p.pasta ?? '';
+    f.pdf.checked = !!p.pdf;
+    f.automatico.checked = p.automatico !== false;
+    $('#erro-drive').textContent = '';
+    $('#dlg-drive').showModal();
+    if (p.rodando) carregarDrive();
+  } catch (e) { avisar(e.message, 'erro'); }
+});
+$('#form-drive').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = ev.target;
+  $('#erro-drive').textContent = '';
+  try {
+    const p = await api('/api/espelho', { metodo: 'POST', corpo: { pasta: f.pasta.value.trim(), pdf: f.pdf.checked, automatico: f.automatico.checked } });
+    statusDrive(p);
+    avisar(p.pasta ? 'Pasta do Google Drive salva.' : 'Cópia para o Google Drive desligada.');
+  } catch (e) { $('#erro-drive').textContent = e.message; }
+});
+$('#btn-drive-agora').addEventListener('click', async () => {
+  const f = $('#form-drive');
+  $('#erro-drive').textContent = '';
+  try {
+    await api('/api/espelho', { metodo: 'POST', corpo: { pasta: f.pasta.value.trim(), pdf: f.pdf.checked, automatico: f.automatico.checked } });
+    const r = await api('/api/espelho/sincronizar', { metodo: 'POST' });
+    avisar(r.mensagem);
+    await carregarDrive();
+  } catch (e) { $('#erro-drive').textContent = e.message; }
+});
+
 async function atualizar() {
   if (encerrado) return;
   try {
@@ -927,6 +988,7 @@ async function atualizar() {
     if (!catalogo.regras.length) catalogo = await api('/api/catalogo');
     await carregarExecucoes();
     await carregarEmpresas();
+    if (!$('#dlg-drive').open) statusDrive(await api('/api/espelho'));
     if (abaAtual === 'inicio') await carregarInicio(resumo);
     if (abaAtual === 'notas') await carregarNotas();
     if (abaAtual === 'conferencia') await carregarConferencia();

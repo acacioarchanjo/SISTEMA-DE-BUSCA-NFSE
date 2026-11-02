@@ -157,6 +157,21 @@ CREATE TABLE IF NOT EXISTS execucoes (
   ultimo_nsu  INTEGER,
   mensagem    TEXT
 );
+
+-- Preferências gravadas pelo painel (ex.: pasta do Google Drive)
+CREATE TABLE IF NOT EXISTS configuracoes (
+  chave         TEXT PRIMARY KEY,
+  valor         TEXT,
+  atualizado_em TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Onde cada nota foi copiada na pasta espelho (Google Drive): permite mover quando a nota é cancelada
+CREATE TABLE IF NOT EXISTS espelho (
+  documento_id  INTEGER PRIMARY KEY REFERENCES documentos(id) ON DELETE CASCADE,
+  caminho       TEXT NOT NULL,           -- relativo à pasta espelho
+  pdf           INTEGER NOT NULL DEFAULT 0,
+  atualizado_em TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 export function abrirBanco(arquivo = config.dbPath) {

@@ -16,6 +16,7 @@ import crypto from 'node:crypto';
 export const novoLoteId = () => `lote_${new Date().toISOString()}_${crypto.randomBytes(3).toString('hex')}`;
 
 import { ErroTrava } from '../execucao/erros.js';
+import { espelharDepoisDaBusca } from '../espelho/drive.js';
 export { ErroTrava };
 
 /**
@@ -219,6 +220,8 @@ export async function sincronizarEmpresa(repo, empresaId, opcoes = {}) {
     throw e;
   } finally {
     cliente?.fechar?.();
+    // copia as notas para a pasta do Google Drive, se configurada (nunca derruba a busca)
+    await espelharDepoisDaBusca(repo, empresaId, { dataDir, origem: 'busca_adn' });
   }
 }
 
