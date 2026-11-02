@@ -141,6 +141,18 @@ pode ser um pendrive, HD externo ou pasta sincronizada com a nuvem) e se inclui 
 - Depois de restaurar, ele confere se a chave do `.env` abre os certificados. Se o backup foi feito sem o `.env`,
   coloque a `NFSE_MASTER_KEY` da época do backup ou cadastre os certificados de novo.
 
+### Windows: atualizar o sistema
+
+Feche o painel e dê **duplo clique em `atualizar.bat`**. Ele:
+1. confere se o painel está fechado;
+2. compara a versão instalada com a do GitHub e, se já estiver atualizado, não faz nada;
+3. faz um **backup automático** dos dados (se o backup falhar, a atualização é cancelada);
+4. baixa a versão nova: usa `git pull` se a pasta veio do `git clone`, ou baixa o ZIP do GitHub;
+5. copia só os arquivos do sistema, **sem tocar em `data`, `backups`, `exportacoes` e `.env`**;
+6. roda o `npm install` e testa se o sistema abre.
+
+Precisa de internet e do Windows 10 ou mais novo (usa o PowerShell para baixar e descompactar).
+
 ### Linha de comando
 
 ```bash
