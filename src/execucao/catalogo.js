@@ -37,6 +37,11 @@ export const CATALOGO = {
     rotulo: 'Exige ação', tipo: 'erro', retentavel: false, exigeAcao: true,
     descricao: 'O robô precisa de uma decisão ou ação de uma pessoa para continuar.',
   },
+  MUDANCA_LAYOUT: {
+    rotulo: 'Mudança no serviço', tipo: 'erro', retentavel: false, exigeAcao: true,
+    descricao: 'A prefeitura respondeu num formato que o conector não reconhece (mudança de versão, de URL ou de fornecedor).',
+    acao: 'Confira a URL e a versão ABRASF do município em "Prefeituras". Se estiverem certas, o conector precisa de ajuste: avise o suporte.',
+  },
   DADO_INCONSISTENTE: {
     rotulo: 'Dado inconsistente', tipo: 'erro', retentavel: true, exigeAcao: true,
     descricao: 'O governo devolveu uma resposta inesperada ou rejeitou a consulta.',
@@ -75,6 +80,13 @@ export const SUBCODIGOS = {
   CHAVE_MESTRA: 'NFSE_MASTER_KEY ausente ou incorreta',
   CERT_TLS: 'Erro de TLS/certificado do servidor',
   INTERROMPIDA: 'Processo encerrado durante a execução',
+  SOAP_FAULT: 'Erro SOAP retornado pela prefeitura',
+  MENSAGEM_RETORNO: 'A prefeitura recusou a consulta (MensagemRetorno)',
+  RESPOSTA_INESPERADA: 'Resposta em formato não reconhecido',
+  HTML_NO_LUGAR_DE_XML: 'A prefeitura devolveu uma página HTML (manutenção ou URL errada)',
+  OPERACAO_NAO_SUPORTADA: 'Operação não disponível neste sistema',
+  URL_INVALIDA: 'URL do webservice inválida',
+  ASSINATURA_EXIGIDA: 'O município exige consulta assinada (ainda não suportado)',
 };
 
 /**
@@ -83,6 +95,7 @@ export const SUBCODIGOS = {
  */
 export function classificarErro(e) {
   const msg = String(e?.message ?? e);
+  if (e?.name === 'ErroConector' && e.codigo) return { codigo: e.codigo, subcodigo: e.subcodigo ?? null };
   if (e?.name === 'ErroTrava' || e?.constructor?.name === 'ErroTrava') {
     return /andamento/i.test(msg)
       ? { codigo: 'EXIGE_ACAO_USUARIO', subcodigo: 'BUSCA_EM_ANDAMENTO' }

@@ -9,13 +9,15 @@ const CAMPOS_DOC = [
   'valor_iss', 'iss_retido', 'valor_pis', 'valor_cofins', 'pis_cofins_retido', 'valor_csll',
   'valor_irrf', 'valor_inss', 'valor_total_retencoes', 'valor_liquido', 'xml_path',
   'prestador_regime', 'tp_ret_issqn', 'codigo_municipio_incidencia',
+  'sistema', 'codigo_verificacao', 'municipio_gerador', 'codigo_servico_municipal',
 ];
 
 // Colunas que o painel/API podem ver de uma empresa (nunca o certificado).
 const COLS_EMPRESA_PUBLICA = `e.id, e.cnpj, e.razao_social, e.cert_cn, e.cert_emissor, e.cert_valido_ate,
   e.ativo, e.trava_ate, e.criado_em, e.atualizado_em, COALESCE(c.ultimo_nsu, 0) AS ultimo_nsu,
   (SELECT COUNT(*) FROM documentos d WHERE d.empresa_id = e.id) AS total_documentos,
-  (SELECT MAX(x.fim) FROM execucoes x WHERE x.empresa_id = e.id AND x.status = 'ok') AS ultima_busca`;
+  (SELECT MAX(x.fim) FROM execucoes x WHERE x.empresa_id = e.id AND x.status = 'ok') AS ultima_busca,
+  (SELECT COUNT(*) FROM vinculos_municipais v WHERE v.empresa_id = e.id AND v.ativo = 1) AS prefeituras`;
 
 export class Repositorio {
   constructor(db) {
@@ -235,7 +237,8 @@ export class Repositorio {
   listarExecucoes({ empresaId, limite = 30 } = {}) {
     return this.db
       .prepare(
-        `SELECT x.*, e.razao_social AS empresa_nome FROM execucoes x LEFT JOIN empresas e ON e.id = x.empresa_id
+        `SELECT x.*, e.razao_social AS empresa_nome, json_extract(x.detalhes, '$.municipio.nome') AS municipio_nome
+         FROM execucoes x LEFT JOIN empresas e ON e.id = x.empresa_id
          ${empresaId ? 'WHERE x.empresa_id = @empresaId' : ''} ORDER BY x.id DESC LIMIT @limite`,
       )
       .all(empresaId ? { empresaId: Number(empresaId), limite: Number(limite) } : { limite: Number(limite) });
@@ -253,6 +256,79 @@ export class Repositorio {
          (SELECT COUNT(*) FROM divergencias WHERE status='aberta' AND severidade='INFO') AS divergencias_info`,
       )
       .get();
+  }
+
+  // ---------- municípios e vínculos (conectores municipais) ----------
+  listarMunicipios() {
+    return this.db
+      .prepare(`SELECT m.*, (SELECT COUNT(*) FROM vinculos_municipais v WHERE v.ibge = m.ibge) AS vinculos FROM municipios m ORDER BY m.nome`)
+      .all()
+      .map((m) => ({ ...m, opcoes: m.opcoes ? JSON.parse(m.opcoes) : {} }));
+  }
+
+  obterMunicipio(ibge) {
+    const m = this.db.prepare('SELECT * FROM municipios WHERE ibge = ?').get(String(ibge));
+    return m ? { ...m, opcoes: m.opcoes ? JSON.parse(m.opcoes) : {} } : undefined;
+  }
+
+  salvarMunicipio({ ibge, nome, uf = null, perfil, url, opcoes = {}, observacoes = null }) {
+    this.db
+      .prepare(
+        `INSERT INTO municipios (ibge, nome, uf, perfil, url, opcoes, observacoes) VALUES (@ibge, @nome, @uf, @perfil, @url, @opcoes, @observacoes)
+         ON CONFLICT(ibge) DO UPDATE SET nome=excluded.nome, uf=excluded.uf, perfil=excluded.perfil, url=excluded.url,
+           opcoes=excluded.opcoes, observacoes=excluded.observacoes, atualizado_em=datetime('now')`,
+      )
+      .run({ ibge: String(ibge), nome, uf, perfil, url, opcoes: JSON.stringify(opcoes ?? {}), observacoes });
+    return this.obterMunicipio(ibge);
+  }
+
+  excluirMunicipio(ibge) {
+    if (this.db.prepare('SELECT COUNT(*) AS n FROM vinculos_municipais WHERE ibge = ?').get(String(ibge)).n) {
+      throw new Error('Há empresas vinculadas a este município. Remova os vínculos antes.');
+    }
+    return this.db.prepare('DELETE FROM municipios WHERE ibge = ?').run(String(ibge)).changes > 0;
+  }
+
+  listarVinculos({ empresaId, somenteAtivos = false } = {}) {
+    const cond = [];
+    const p = {};
+    if (empresaId) { cond.push('v.empresa_id = @empresaId'); p.empresaId = Number(empresaId); }
+    if (somenteAtivos) cond.push('v.ativo = 1');
+    return this.db
+      .prepare(
+        `SELECT v.*, m.nome AS municipio_nome, m.uf, m.perfil, m.url, e.razao_social AS empresa_nome, e.cnpj AS empresa_cnpj,
+           (SELECT x.codigo FROM execucoes x WHERE x.empresa_id = v.empresa_id AND x.tipo = 'busca_municipal'
+              AND json_extract(x.detalhes, '$.vinculo_id') = v.id ORDER BY x.id DESC LIMIT 1) AS ultimo_codigo,
+           (SELECT x.fim FROM execucoes x WHERE x.empresa_id = v.empresa_id AND x.tipo = 'busca_municipal'
+              AND json_extract(x.detalhes, '$.vinculo_id') = v.id ORDER BY x.id DESC LIMIT 1) AS ultima_execucao
+         FROM vinculos_municipais v JOIN municipios m ON m.ibge = v.ibge JOIN empresas e ON e.id = v.empresa_id
+         ${cond.length ? 'WHERE ' + cond.join(' AND ') : ''} ORDER BY e.razao_social, m.nome`,
+      )
+      .all(p);
+  }
+
+  obterVinculo(id) {
+    return this.listarVinculos().find((v) => v.id === Number(id));
+  }
+
+  salvarVinculo({ empresaId, ibge, inscricaoMunicipal = null, ativo = true }) {
+    this.db
+      .prepare(
+        `INSERT INTO vinculos_municipais (empresa_id, ibge, inscricao_municipal, ativo) VALUES (?, ?, ?, ?)
+         ON CONFLICT(empresa_id, ibge) DO UPDATE SET inscricao_municipal=excluded.inscricao_municipal, ativo=excluded.ativo`,
+      )
+      .run(Number(empresaId), String(ibge), inscricaoMunicipal || null, ativo ? 1 : 0);
+    return this.db.prepare('SELECT id FROM vinculos_municipais WHERE empresa_id = ? AND ibge = ?').get(Number(empresaId), String(ibge)).id;
+  }
+
+  excluirVinculo(id) {
+    return this.db.prepare('DELETE FROM vinculos_municipais WHERE id = ?').run(Number(id)).changes > 0;
+  }
+
+  avancarVinculo(id, ultimaData) {
+    this.db
+      .prepare('UPDATE vinculos_municipais SET ultima_data = ? WHERE id = ? AND (ultima_data IS NULL OR ultima_data < ?)')
+      .run(ultimaData, Number(id), ultimaData);
   }
 
   // ---------- divergências ----------

@@ -18,7 +18,7 @@ const doc = (d) => {
 };
 const icone = (nome) => `<svg><use href="#i-${nome}"/></svg>`;
 const PAPEL = { emitida: 'Emitida', recebida: 'Recebida', intermediario: 'Intermediário', outro: 'Outro' };
-const TIPO_EXEC = { busca_adn: 'Busca no ADN', conciliacao: 'Conciliação' };
+const TIPO_EXEC = { busca_adn: 'Busca no ADN', conciliacao: 'Conciliação', busca_municipal: 'Busca na prefeitura' };
 const STATUS_EXEC = { ok: 'Concluída', erro: 'Erro', travada: 'Travada', executando: 'Executando' };
 const SEVERIDADE = { BLOQUEANTE: 'Bloqueante', ALERTA: 'Alerta', INFO: 'Informativa' };
 const STATUS_DIV = { aberta: 'aberta', ignorada: 'ignorada', resolvida: 'resolvida' };
@@ -208,6 +208,7 @@ function cartaoEmpresa(e) {
       ${e.ativo ? '' : '<span class="pilula">inativa</span>'}
       ${travada ? `<span class="pilula alerta" title="Proteção contra consumo indevido">pausada até ${esc(dataHora(e.trava_ate))}</span>` : ''}
       ${rodando ? '<span class="pilula executando">buscando…</span>' : ''}
+      ${e.prefeituras ? `<span class="pilula primaria sem-ponto" title="Prefeituras com webservice consultadas">+ ${e.prefeituras} prefeitura(s)</span>` : ''}
     </div>
     <div class="empresa-numeros">
       <div><small>Notas</small><b>${numero(e.total_documentos)}</b></div>
@@ -220,6 +221,7 @@ function cartaoEmpresa(e) {
       <details class="mais">
         <summary class="botao secundario icone-so" title="Mais ações">${icone('dots')}</summary>
         <div class="mais-menu">
+          <button class="botao-fantasma" data-acao="prefeituras" data-id="${e.id}">Prefeituras (webservice municipal)…</button>
           <button class="botao-fantasma" data-acao="conciliar" data-id="${e.id}">Conciliar com o portal</button>
           <button class="botao-fantasma" data-acao="importar" data-id="${e.id}">Importar XMLs</button>
           ${travada ? `<button class="botao-fantasma" data-acao="destravar" data-id="${e.id}">Liberar busca agora</button>` : ''}
@@ -258,6 +260,9 @@ $('#lista-empresas').addEventListener('click', async (ev) => {
         $('#dlg-conciliar').showModal();
         break;
       }
+      case 'prefeituras':
+        await abrirPrefeituras(id);
+        break;
       case 'importar':
         empresaSelecionada = id;
         $('#arquivo-importar').click();
@@ -406,14 +411,13 @@ async function carregarNotas() {
         <td class="num">${moeda(d.valor_iss)}${d.iss_retido ? '<span class="sub">retido</span>' : ''}</td>
         <td class="num col-ret">${moeda(d.valor_total_retencoes)}</td>
         <td class="num"><b>${moeda(d.valor_liquido)}</b></td>
-        <td>${d.situacao === 'normal' ? '<span class="pilula ok">normal</span>' : `<span class="pilula erro">${esc(d.situacao)}</span>`}</td>
-        <td>${pontoConferencia(d)}</td>
+        <td><div class="situacao-conf">${d.situacao === 'normal' ? '<span class="pilula ok">normal</span>' : `<span class="pilula erro">${esc(d.situacao)}</span>`}${pontoConferencia(d)}</div></td>
         <td><div class="acoes">
           <button class="icone-acao" data-ver="${d.id}" title="Detalhes">${icone('search')}</button>
           <a class="icone-acao" href="/api/documentos/${d.id}/xml" title="Baixar XML">XML</a>
           <a class="icone-acao" href="/api/documentos/${d.id}/pdf" title="Baixar PDF">PDF</a>
         </div></td></tr>`).join('')
-    : '<tr><td colspan="11" class="vazio">Nenhuma nota encontrada com esses filtros.</td></tr>';
+    : '<tr><td colspan="10" class="vazio">Nenhuma nota encontrada com esses filtros.</td></tr>';
   const total = totais.quantidade;
   $('#pag-info').textContent = total ? `${numero(pagina * POR_PAGINA + 1)}–${numero(Math.min((pagina + 1) * POR_PAGINA, total))} de ${numero(total)}` : '';
   $('#pag-ant').disabled = pagina === 0;
@@ -485,8 +489,9 @@ function abrirNota(d) {
       ['Total de retenções', `<b>${moeda(d.valor_total_retencoes)}</b>`],
     ])}</div>
     <div class="secao-nota"><h4>Identificação</h4>${dl([
-      ['Chave de acesso', `<span class="chave">${esc(d.chave)}</span>`],
-      ['Origem', esc({ adn: 'ADN (distribuição)', conciliacao: 'Conciliação', importacao: 'Importação manual' }[d.origem] ?? d.origem)],
+      [d.sistema === 'abrasf' ? 'Identificador' : 'Chave de acesso', `<span class="chave">${esc(d.chave)}</span>`],
+      ...(d.codigo_verificacao ? [['Código de verificação', `<span class="chave">${esc(d.codigo_verificacao)}</span>`]] : []),
+      ['Origem', esc({ adn: 'ADN (distribuição)', conciliacao: 'Conciliação', importacao: 'Importação manual', prefeitura: 'Prefeitura (webservice ABRASF)' }[d.origem] ?? d.origem)],
       ['NSU', esc(d.nsu ?? '—')],
     ])}</div>
     ${d.eventos.length ? `<div class="secao-nota"><h4>Eventos</h4><ul class="linha-tempo">${d.eventos
@@ -509,7 +514,7 @@ async function carregarExecucoes() {
   $('#lista-execucoes').innerHTML = execucoes.length
     ? execucoes.map((x) => `<tr class="clicavel" data-exec="${x.id}" title="Ver detalhes">
         <td><span class="pilula ${classeStatus(infoStatus(x).tipo)}" title="${esc(catalogo.subcodigos[x.subcodigo] ?? '')}">${esc(infoStatus(x).rotulo)}</span></td>
-        <td class="nome"><b>${esc(x.empresa_nome ?? '—')}</b></td>
+        <td class="nome"><b>${esc(x.empresa_nome ?? '—')}</b>${x.municipio_nome ? `<span class="sub">${esc(x.municipio_nome)}</span>` : ''}</td>
         <td>${esc(TIPO_EXEC[x.tipo] ?? x.tipo)}</td>
         <td title="${esc(dataHora(x.inicio))}">${esc(relativo(x.inicio))}</td>
         <td>${esc(duracao(x.inicio, x.fim))}</td>
@@ -538,8 +543,13 @@ $('#lista-execucoes').addEventListener('click', async (ev) => {
       <div class="secao-nota"><h4>Resumo</h4><dl class="detalhe">
         <dt>Início</dt><dd>${esc(dataHora(x.inicio))}</dd>
         <dt>Duração</dt><dd>${esc(duracao(x.inicio, x.fim))}</dd>
-        <dt>Lotes / notas novas</dt><dd>${numero(x.lotes)} / ${numero(x.novos)}</dd>
-        <dt>Eventos novos</dt><dd>${numero(x.eventos)}</dd>
+        ${x.tipo === 'busca_municipal' ? `
+        <dt>Prefeitura</dt><dd>${esc(det.municipio?.nome ?? '—')}${det.municipio?.uf ? '/' + esc(det.municipio.uf) : ''} · ${esc(det.perfil ?? '')}</dd>
+        <dt>Período</dt><dd>${dataBR(det.periodo?.de)} a ${dataBR(det.periodo?.ate)}</dd>
+        <dt>Consultas feitas</dt><dd>${numero(x.lotes)}</dd>
+        ${Object.entries(det.por_papel ?? {}).map(([p, v]) => `<dt>Notas ${esc(p)}</dt><dd>${typeof v === 'object' ? `${numero(v.notas)} (${numero(v.novas)} nova(s))` : 'não disponível neste município'}</dd>`).join('')}`
+        : `<dt>Lotes / notas novas</dt><dd>${numero(x.lotes)} / ${numero(x.novos)}</dd>
+        <dt>Eventos novos</dt><dd>${numero(x.eventos)}</dd>`}
         ${det.cursor ? `<dt>NSU</dt><dd>${numero(det.cursor.de)} → ${numero(det.cursor.ate)}</dd>` : ''}
         ${x.lote_id ? `<dt>Lote</dt><dd><span class="chave">${esc(x.lote_id)}</span></dd>` : ''}
         <dt>Mensagem</dt><dd>${esc(x.mensagem ?? '—')}</dd>
@@ -549,7 +559,8 @@ $('#lista-execucoes').addEventListener('click', async (ev) => {
         <dt>Nesta execução</dt><dd>${numero(v.novas)} nova(s) · ${numero(v.resolvidas)} resolvida(s)</dd></dl></div>` : ''}
       ${det.documentos_com_erro?.length ? `<div class="secao-nota"><h4>Documentos com erro</h4>${lista(det.documentos_com_erro)}</div>` : ''}
       ${det.falhas_transitorias?.length ? `<div class="secao-nota"><h4>Falhas temporárias (repetidas automaticamente)</h4>${lista(det.falhas_transitorias.map((f) => `${dataHora(f.em)} — ${f.erro} (nova tentativa em ${Math.round(f.esperaMs / 1000)}s)`))}</div>` : ''}
-      ${det.falhas?.length ? `<div class="secao-nota"><h4>Falhas</h4>${lista(det.falhas)}</div>` : ''}`;
+      ${det.falhas?.length ? `<div class="secao-nota"><h4>Falhas</h4>${lista(det.falhas)}</div>` : ''}
+      ${det.resposta ? `<div class="secao-nota"><h4>Resposta da prefeitura (início)</h4><pre class="resposta-bruta">${esc(det.resposta)}</pre></div>` : ''}`;
     $('#dlg-exec').showModal();
   } catch (e) {
     avisar(e.message, 'erro');
@@ -849,3 +860,111 @@ async function atualizar() {
 }
 setInterval(() => { if (haExecutando && !encerrado) atualizar(); }, 3000);
 atualizar();
+
+// ---------------- Prefeituras (conectores municipais) ----------------
+let empresaPrefeituras = null;
+let perfisMunicipais = [];
+const NOVO_MUNICIPIO = '__novo__';
+
+async function abrirPrefeituras(empresaId) {
+  empresaPrefeituras = empresas.find((e) => e.id === empresaId);
+  $('#titulo-prefeituras').textContent = `Prefeituras — ${empresaPrefeituras?.razao_social ?? ''}`;
+  $('#form-vinculo').reset();
+  $('#erro-vinculo').textContent = '';
+  $('#novo-municipio').classList.add('oculto');
+  if (!perfisMunicipais.length) perfisMunicipais = (await api('/api/perfis')).perfis;
+  $('#vinc-perfil').innerHTML = perfisMunicipais
+    .map((p) => `<option value="${esc(p.id)}" ${p.id === 'abrasf-2.02' ? 'selected' : ''}>${esc(p.nome)}${p.tomadas ? '' : ' (só notas prestadas)'}</option>`).join('');
+  await carregarVinculos();
+  $('#dlg-prefeituras').showModal();
+}
+
+async function carregarVinculos() {
+  const [vinculos, municipios] = await Promise.all([api(`/api/vinculos?empresa=${empresaPrefeituras.id}`), api('/api/municipios')]);
+  const jaVinculados = new Set(vinculos.map((v) => v.ibge));
+  $('#vinc-municipio').innerHTML = '<option value="">Escolha…</option>' +
+    municipios.filter((m) => !jaVinculados.has(m.ibge))
+      .map((m) => `<option value="${esc(m.ibge)}">${esc(m.nome)}${m.uf ? '/' + esc(m.uf) : ''} — ${esc(m.perfil)}</option>`).join('') +
+    `<option value="${NOVO_MUNICIPIO}">+ Cadastrar novo município…</option>`;
+  $('#lista-vinculos').innerHTML = vinculos.length
+    ? vinculos.map((v) => {
+        const st = v.ultimo_codigo ? catalogo.status[v.ultimo_codigo] : null;
+        return `<div class="vinculo" data-vinculo="${v.id}">
+          <div>
+            <b>${esc(v.municipio_nome)}${v.uf ? '/' + esc(v.uf) : ''}</b>
+            ${st ? `<span class="pilula ${classeStatus(st.tipo)}">${esc(st.rotulo)}</span>` : '<span class="pilula">nunca buscado</span>'}
+            ${v.ativo ? '' : '<span class="pilula">inativo</span>'}
+            <div class="meta">IBGE ${esc(v.ibge)} · ${esc(v.perfil)}${v.inscricao_municipal ? ` · IM ${esc(v.inscricao_municipal)}` : ''} · consultado até ${v.ultima_data ? dataBR(v.ultima_data) : '—'}</div>
+            <div class="meta">${esc(v.url)}</div>
+          </div>
+          <div class="div-acoes">
+            <button class="botao secundario pequeno" data-vacao="testar">Testar conexão</button>
+            <button class="botao pequeno" data-vacao="buscar">${icone('play')}Buscar agora</button>
+            <button class="botao-fantasma perigo pequeno" data-vacao="remover" title="Remover vínculo">${icone('x')}</button>
+          </div>
+          <div class="resultado oculto"></div>
+        </div>`;
+      }).join('')
+    : '<p class="sub">Nenhuma prefeitura vinculada a esta empresa.</p>';
+}
+
+$('#vinc-municipio').addEventListener('change', (ev) => $('#novo-municipio').classList.toggle('oculto', ev.target.value !== NOVO_MUNICIPIO));
+
+$('#form-vinculo').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  $('#erro-vinculo').textContent = '';
+  try {
+    let ibge = f.get('ibge');
+    if (ibge === NOVO_MUNICIPIO) {
+      const opcoes = {};
+      for (const [k, v] of f) if (k.startsWith('op_') && k !== 'op_semSoapAction' && v !== '') opcoes[k.slice(3)] = v;
+      if (f.get('op_semSoapAction')) opcoes.soapAction = '';
+      const m = await api('/api/municipios', {
+        metodo: 'POST',
+        corpo: { ibge: f.get('novo_ibge'), nome: f.get('novo_nome'), uf: f.get('novo_uf'), perfil: f.get('novo_perfil'), url: f.get('novo_url'), opcoes },
+      });
+      ibge = m.ibge;
+    }
+    if (!ibge) throw new Error('Escolha o município.');
+    await api('/api/vinculos', { metodo: 'POST', corpo: { empresa: empresaPrefeituras.id, ibge, inscricaoMunicipal: f.get('inscricaoMunicipal') } });
+    ev.target.reset();
+    $('#novo-municipio').classList.add('oculto');
+    avisar('Prefeitura vinculada. Use “Testar conexão” antes da primeira busca.');
+    await carregarVinculos();
+    atualizar();
+  } catch (e) {
+    $('#erro-vinculo').textContent = e.message;
+  }
+});
+
+$('#lista-vinculos').addEventListener('click', async (ev) => {
+  const b = ev.target.closest('[data-vacao]');
+  if (!b) return;
+  const caixa = b.closest('[data-vinculo]');
+  const id = caixa.dataset.vinculo;
+  const resultado = caixa.querySelector('.resultado');
+  const mostrar = (cls, txt) => { resultado.className = `resultado ${cls}`; resultado.textContent = txt; };
+  try {
+    if (b.dataset.vacao === 'testar') {
+      b.disabled = true;
+      mostrar('', 'Testando… (pode levar alguns segundos)');
+      const t = await api(`/api/vinculos/${id}/testar`, { metodo: 'POST' });
+      if (t.ok) mostrar('ok', `✓ ${t.mensagem}`);
+      else mostrar('erro', `${catalogo.status[t.codigo]?.rotulo ?? t.codigo}: ${t.mensagem}${t.acao ? ` — ${t.acao}` : ''}`);
+      b.disabled = false;
+    } else if (b.dataset.vacao === 'buscar') {
+      const r = await api(`/api/vinculos/${id}/buscar`, { metodo: 'POST', corpo: {} });
+      avisar(`${r.mensagem} Acompanhe em Execuções.`);
+      setTimeout(atualizar, 600);
+    } else if (b.dataset.vacao === 'remover') {
+      if (!confirm('Remover este vínculo? As notas já baixadas continuam no sistema.')) return;
+      await api(`/api/vinculos/${id}`, { metodo: 'DELETE' });
+      await carregarVinculos();
+      atualizar();
+    }
+  } catch (e) {
+    b.disabled = false;
+    mostrar('erro', e.message);
+  }
+});

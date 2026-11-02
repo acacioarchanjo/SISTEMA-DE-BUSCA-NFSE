@@ -102,6 +102,31 @@ CREATE TABLE IF NOT EXISTS divergencias (
 );
 CREATE INDEX IF NOT EXISTS ix_div_empresa ON divergencias(empresa_id, status, severidade);
 
+-- Cadastro de municípios com webservice próprio (conectores da fase 2)
+CREATE TABLE IF NOT EXISTS municipios (
+  ibge           TEXT PRIMARY KEY,          -- código IBGE (7 dígitos)
+  nome           TEXT NOT NULL,
+  uf             TEXT,
+  perfil         TEXT NOT NULL,             -- abrasf-1.00 | abrasf-2.01..2.04
+  url            TEXT NOT NULL,             -- endpoint do webservice (https)
+  opcoes         TEXT,                      -- JSON com variações do envelope SOAP
+  observacoes    TEXT,
+  criado_em      TEXT NOT NULL DEFAULT (datetime('now')),
+  atualizado_em  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Empresa × município: quais prefeituras consultar para cada empresa
+CREATE TABLE IF NOT EXISTS vinculos_municipais (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  empresa_id           INTEGER NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+  ibge                 TEXT NOT NULL REFERENCES municipios(ibge),
+  inscricao_municipal  TEXT,
+  ativo                INTEGER NOT NULL DEFAULT 1,
+  ultima_data          TEXT,                -- última data (AAAA-MM-DD) consultada com sucesso
+  criado_em            TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (empresa_id, ibge)
+);
+
 -- Log de auditoria append-only, encadeado por hash (src/auditoria.js)
 CREATE TABLE IF NOT EXISTS auditoria (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -164,6 +189,10 @@ const COLUNAS_NOVAS = {
     tp_ret_issqn: 'TEXT',                // 1 não retido | 2 retido pelo tomador | 3 retido pelo intermediário
     codigo_municipio_incidencia: 'TEXT',
     validado_em: 'TEXT',
+    sistema: 'TEXT',                     // adn | abrasf (origem do documento)
+    codigo_verificacao: 'TEXT',          // notas municipais
+    municipio_gerador: 'TEXT',           // IBGE do município emissor (notas municipais)
+    codigo_servico_municipal: 'TEXT',
   },
 };
 

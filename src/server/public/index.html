@@ -158,7 +158,7 @@
           <table>
             <thead><tr>
               <th>Competência</th><th>Nº</th><th>Prestador</th><th>Tomador</th>
-              <th class="num">Valor</th><th class="num">ISS</th><th class="num col-ret">Retenções</th><th class="num">Líquido</th><th>Situação</th><th title="Conferência fiscal">Conf.</th><th></th>
+              <th class="num">Valor</th><th class="num">ISS</th><th class="num col-ret">Retenções</th><th class="num">Líquido</th><th>Situação</th><th></th>
             </tr></thead>
             <tbody id="lista-notas"></tbody>
           </table>
@@ -303,6 +303,58 @@
           <button type="button" class="botao" id="btn-lote-cadastrar" disabled>Cadastrar</button>
         </menu>
       </div>
+    </div>
+  </dialog>
+
+  <!-- Diálogo: prefeituras (conectores municipais) da empresa -->
+  <dialog id="dlg-prefeituras" class="modal largo">
+    <div class="lote">
+      <div class="modal-topo">
+        <h3 id="titulo-prefeituras">Prefeituras</h3>
+        <button type="button" class="botao-fantasma icone-so" data-fechar title="Fechar"><svg><use href="#i-x"/></svg></button>
+      </div>
+      <p class="dica"><svg><use href="#i-building"/></svg><span>Use para municípios com webservice próprio (padrão ABRASF) cujas notas <b>não chegam ao ADN</b>. Se o município já envia ao ADN, as notas podem aparecer duas vezes — a conferência avisa (DUP-001).</span></p>
+
+      <div id="lista-vinculos" class="lista-vinculos"></div>
+
+      <form id="form-vinculo" class="cartao form-vinculo">
+        <h4>Adicionar prefeitura</h4>
+        <div class="linha-2">
+          <label class="campo"><span>Município</span>
+            <select name="ibge" id="vinc-municipio" required><option value="">Escolha…</option></select>
+          </label>
+          <label class="campo"><span>Inscrição municipal <small>(opcional, exigida por alguns municípios)</small></span><input name="inscricaoMunicipal" inputmode="numeric"></label>
+        </div>
+        <fieldset id="novo-municipio" class="novo-municipio oculto">
+          <legend>Novo município</legend>
+          <div class="linha-3">
+            <label class="campo"><span>Código IBGE <small>(7 dígitos)</small></span><input name="novo_ibge" inputmode="numeric" maxlength="7" placeholder="ex.: 4205407"></label>
+            <label class="campo"><span>Nome</span><input name="novo_nome" placeholder="ex.: Florianópolis"></label>
+            <label class="campo"><span>UF</span><input name="novo_uf" maxlength="2" placeholder="SC"></label>
+          </div>
+          <div class="linha-2">
+            <label class="campo"><span>Padrão do webservice</span><select name="novo_perfil" id="vinc-perfil"></select></label>
+            <label class="campo"><span>URL do webservice <small>(https, do manual da prefeitura)</small></span><input name="novo_url" placeholder="https://…"></label>
+          </div>
+          <details class="avancado">
+            <summary>Opções avançadas do envelope SOAP <small>(só se o manual do município pedir)</small></summary>
+            <div class="linha-3">
+              <label class="campo"><span>Versão SOAP</span><select name="op_soapVersao"><option value="">padrão (1.1)</option><option>1.1</option><option>1.2</option></select></label>
+              <label class="campo"><span>Estilo</span><select name="op_estilo"><option value="">padrão do perfil</option><option value="cabec-dados">nfseCabecMsg/nfseDadosMsg</option><option value="direto">XML direto no Body</option></select></label>
+              <label class="campo"><span>XML embutido</span><select name="op_embutir"><option value="">padrão (escapado)</option><option value="escapado">escapado</option><option value="cdata">CDATA</option></select></label>
+              <label class="campo"><span>Namespace da operação</span><input name="op_nsServico" placeholder="http://nfse.abrasf.org.br"></label>
+              <label class="campo"><span>Elemento da operação</span><input name="op_elementoOperacao" placeholder="{op}Request"></label>
+              <label class="campo"><span>SOAPAction</span><input name="op_soapAction" placeholder="{ns}/{op}"></label>
+              <label class="campo"><span>Período por</span><select name="op_periodo"><option value="">emissão</option><option value="competencia">competência</option></select></label>
+              <label class="campo"><span>Dias por consulta</span><input name="op_janelaDias" inputmode="numeric" placeholder="30"></label>
+              <label class="campo"><span>Pausa entre consultas (ms)</span><input name="op_intervaloMs" inputmode="numeric" placeholder="1200"></label>
+            </div>
+            <label class="check"><input type="checkbox" name="op_semSoapAction"> não enviar o cabeçalho SOAPAction</label>
+          </details>
+        </fieldset>
+        <div class="erro" id="erro-vinculo"></div>
+        <menu><button type="submit" class="botao"><svg><use href="#i-plus"/></svg>Vincular</button></menu>
+      </form>
     </div>
   </dialog>
 

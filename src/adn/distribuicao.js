@@ -10,13 +10,13 @@ import { classificarErro, classificarSucesso, statusLegado, CATALOGO } from '../
 import { registrarAuditoria } from '../auditoria.js';
 import { validarDocumentos } from '../fiscal/validacao.js';
 import { REGRAS_VERSAO } from '../fiscal/regras.js';
+import { sincronizarMunicipal } from '../conectores/sincronizacao.js';
 import crypto from 'node:crypto';
 
 export const novoLoteId = () => `lote_${new Date().toISOString()}_${crypto.randomBytes(3).toString('hex')}`;
 
-export class ErroTrava extends Error {
-  name = 'ErroTrava';
-}
+import { ErroTrava } from '../execucao/erros.js';
+export { ErroTrava };
 
 /**
  * Grava uma NFS-e (XML) para a empresa. Devolve true se for documento novo.
@@ -30,6 +30,7 @@ export function registrarNfse(repo, empresa, { xml, nsu = null, origem = 'adn' }
     empresa_id: empresa.id,
     nsu,
     origem,
+    sistema: 'adn',
     papel: papelDaEmpresa(nota, empresa.cnpj),
     situacao: 'normal',
     iss_retido: nota.iss_retido ? 1 : 0,
@@ -232,10 +233,21 @@ export async function sincronizarTodas(repo, opcoes = {}) {
   for (const emp of repo.listarEmpresas({ somenteAtivas: true })) {
     try {
       const r = await sincronizarEmpresa(repo, emp.id, { ...opcoes, loteId });
-      resultados.push({ empresa: emp.razao_social, cnpj: emp.cnpj, ok: true, codigo: r.codigo, mensagem: r.mensagem, novos: r.novos, eventos: r.eventos, validacao: r.validacao?.abertas ?? null });
+      resultados.push({ empresa: emp.razao_social, cnpj: emp.cnpj, fonte: 'ADN', ok: true, codigo: r.codigo, mensagem: r.mensagem, novos: r.novos, eventos: r.eventos, validacao: r.validacao?.abertas ?? null });
     } catch (e) {
       const c = e.codigo ? { codigo: e.codigo, subcodigo: e.subcodigo } : classificarErro(e);
-      resultados.push({ empresa: emp.razao_social, cnpj: emp.cnpj, ok: false, ...c, mensagem: e.message, novos: e.estado?.novos ?? 0, eventos: e.estado?.eventos ?? 0 });
+      resultados.push({ empresa: emp.razao_social, cnpj: emp.cnpj, fonte: 'ADN', ok: false, ...c, mensagem: e.message, novos: e.estado?.novos ?? 0, eventos: e.estado?.eventos ?? 0 });
+    }
+    // Prefeituras vinculadas à empresa (conectores municipais)
+    if (opcoes.municipal === false) continue;
+    for (const v of repo.listarVinculos({ empresaId: emp.id, somenteAtivos: true })) {
+      try {
+        const r = await sincronizarMunicipal(repo, v.id, { loteId, dataDir: opcoes.dataDir, criarConector: opcoes.criarConectorMunicipal });
+        resultados.push({ empresa: emp.razao_social, cnpj: emp.cnpj, fonte: v.municipio_nome, ok: true, codigo: r.codigo, mensagem: r.mensagem, novos: r.novos, eventos: 0, validacao: r.validacao?.abertas ?? null });
+      } catch (e) {
+        const c = e.codigo ? { codigo: e.codigo, subcodigo: e.subcodigo } : classificarErro(e);
+        resultados.push({ empresa: emp.razao_social, cnpj: emp.cnpj, fonte: v.municipio_nome, ok: false, ...c, mensagem: e.message, novos: e.estado?.novos ?? 0, eventos: 0 });
+      }
     }
   }
   const porStatus = {};
@@ -253,7 +265,7 @@ export async function sincronizarTodas(repo, opcoes = {}) {
       finalizado_em: new Date().toISOString(),
       duracao_ms: Date.now() - iniciado.getTime(),
       resumo: { empresas: resultados.length, status: porStatus, notas_novas: soma('novos'), eventos_novos: soma('eventos'), divergencias_abertas: divergencias },
-      empresas: resultados.map(({ empresa, cnpj, codigo, subcodigo, mensagem }) => ({ empresa, cnpj, status: codigo, subcodigo: subcodigo ?? null, mensagem })),
+      empresas: resultados.map(({ empresa, cnpj, fonte, codigo, subcodigo, mensagem }) => ({ empresa, cnpj, fonte, status: codigo, subcodigo: subcodigo ?? null, mensagem })),
     },
   });
   return resultados;

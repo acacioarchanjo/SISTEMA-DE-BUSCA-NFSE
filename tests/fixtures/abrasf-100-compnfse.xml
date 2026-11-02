@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CompNfse xmlns="http://www.abrasf.org.br/ABRASF/arquivos/nfse.xsd">
+  <Nfse>
+    <InfNfse Id="N55">
+      <Numero>55</Numero>
+      <CodigoVerificacao>XYZ-9</CodigoVerificacao>
+      <DataEmissao>2025-11-05T10:00:00</DataEmissao>
+      <NaturezaOperacao>1</NaturezaOperacao>
+      <OptanteSimplesNacional>1</OptanteSimplesNacional>
+      <IncentivadorCultural>2</IncentivadorCultural>
+      <Competencia>2025-11-01T00:00:00</Competencia>
+      <Servico>
+        <Valores>
+          <ValorServicos>1000.00</ValorServicos>
+          <ValorDeducoes>0.00</ValorDeducoes>
+          <IssRetido>1</IssRetido>
+          <ValorIss>30.00</ValorIss>
+          <ValorIssRetido>30.00</ValorIssRetido>
+          <BaseCalculo>1000.00</BaseCalculo>
+          <Aliquota>0.03</Aliquota>
+          <ValorLiquidoNfse>970.00</ValorLiquidoNfse>
+        </Valores>
+        <ItemListaServico>0107</ItemListaServico>
+        <Discriminacao>Suporte técnico em informática</Discriminacao>
+        <CodigoMunicipio>3106200</CodigoMunicipio>
+      </Servico>
+      <PrestadorServico>
+        <IdentificacaoPrestador><Cnpj>11222333000181</Cnpj><InscricaoMunicipal>123</InscricaoMunicipal></IdentificacaoPrestador>
+        <RazaoSocial>EMPRESA TESTE LTDA</RazaoSocial>
+      </PrestadorServico>
+      <TomadorServico>
+        <IdentificacaoTomador><CpfCnpj><Cnpj>04252011000110</Cnpj></CpfCnpj></IdentificacaoTomador>
+        <RazaoSocial>CLIENTE TOMADOR S.A.</RazaoSocial>
+      </TomadorServico>
+      <OrgaoGerador><CodigoMunicipio>3106200</CodigoMunicipio><Uf>MG</Uf></OrgaoGerador>
+    </InfNfse>
+  </Nfse>
+  <NfseCancelamento>
+    <Confirmacao>
+      <Pedido><InfPedidoCancelamento><CodigoCancelamento>1</CodigoCancelamento></InfPedidoCancelamento></Pedido>
+      <DataHoraCancelamento>2025-12-02T09:00:00</DataHoraCancelamento>
+    </Confirmacao>
+  </NfseCancelamento>
+</CompNfse>

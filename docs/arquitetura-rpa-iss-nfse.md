@@ -603,7 +603,7 @@ Observações:
 |---|---|---|
 | 0 (feito) | Captura ADN/NFS-e Nacional, cursor NSU, eventos, trava de consumo indevido, cofre de certificados, importação em lote, exportação, backup | — |
 | 1 (feito) | Catálogo de status (seção 11) e log de auditoria (seção 12) nas execuções atuais; regras `RET-001/002/004/005`, `ALQ-001/002`, `CMP-001`, `CAN-001` sobre as notas do ADN — `src/execucao/catalogo.js`, `src/auditoria.js`, `src/fiscal/` | `execucoes`, `parser.js`, painel |
-| 2 | Contrato `ConectorMunicipal` + conector **ABRASF genérico** (consulta de prestado/tomado) + cadastro de municípios | `cliente.js` (mTLS), `credenciais.js` |
+| 2 (feito) | Contrato `ConectorMunicipal` + conector **ABRASF genérico** 1.00/2.01–2.04 (consulta de prestado/tomado, janelas, paginação, variações de envelope SOAP) + cadastro de municípios e vínculos + regra `DUP-001` — `src/conectores/` | `cliente.js` (mTLS), `credenciais.js` |
 | 3 | Fila de pendências HITL no painel (credencial, divergência, aprovação) | painel, `alertas` da página Início |
 | 4 | Conector **São Paulo** (consultas por API) e **conferência de retenções** (CPOM) | modelo canônico |
 | 5 | Workers em nuvem (Temporal + Postgres + objetos) mantendo o **app local como agente** para A3 e IP do cliente | `abrir.vbs`/agendador como agente |

@@ -8,6 +8,7 @@ import { registrarAuditoria } from '../auditoria.js';
 /** Notas gravadas antes destes campos existirem: completa a partir do XML guardado. */
 function completarMetadados(repo, doc, dataDir) {
   if (doc.prestador_regime != null || doc.tp_ret_issqn != null || !doc.xml_path) return doc;
+  if (doc.sistema && doc.sistema !== 'adn') return doc; // notas municipais já vêm completas do conector
   try {
     const n = parseNfse(lerXmlSalvo(doc.xml_path, dataDir));
     repo.db
@@ -43,11 +44,22 @@ export function validarDocumentos(repo, { empresaId, documentoIds, dataDir = con
        regras_versao=@regras_versao, status=@status, motivo=@motivo, atualizado_em=datetime('now') WHERE id=@id`,
   );
   const marcarValidado = db.prepare("UPDATE documentos SET validado_em = datetime('now') WHERE id = ?");
+  // Mesma prestação vinda de outra fonte (ADN × prefeitura): numeração e chave diferem, então compara o conteúdo.
+  const buscarDuplicatas = db.prepare(
+    `SELECT id, numero, chave, COALESCE(sistema, 'adn') AS sistema FROM documentos
+     WHERE empresa_id = @empresa AND id <> @id AND COALESCE(sistema, 'adn') <> @sistema AND situacao = 'normal'
+       AND prestador_doc = @prestador AND COALESCE(tomador_doc, '') = @tomador
+       AND ABS(COALESCE(valor_servico, 0) - @valor) < 0.005 AND substr(data_emissao, 1, 10) = @data
+     LIMIT 3`,
+  );
 
   db.transaction(() => {
     for (const bruto of docs) {
       const doc = completarMetadados(repo, bruto, dataDir);
-      const achadas = avaliarNota(doc, { eventos: repo.listarEventos(doc.empresa_id, doc.chave) });
+      const duplicatas = doc.prestador_doc && doc.data_emissao
+        ? buscarDuplicatas.all({ id: doc.id, empresa: doc.empresa_id, sistema: doc.sistema ?? 'adn', prestador: doc.prestador_doc, tomador: doc.tomador_doc ?? '', valor: doc.valor_servico ?? 0, data: String(doc.data_emissao).slice(0, 10) })
+        : [];
+      const achadas = avaliarNota(doc, { eventos: repo.listarEventos(doc.empresa_id, doc.chave), duplicatas });
       const existentes = new Map(existentesDe.all(doc.id).map((d) => [d.codigo, d]));
 
       for (const a of achadas) {
