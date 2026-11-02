@@ -1,0 +1,23 @@
+# ===== NUNCA subir =====
+# Segredos e configuração local
+.env
+.env.local
+
+# Dados locais: banco, certificados A1 (.pfx) e XMLs de notas de CLIENTES REAIS.
+# NADA de dado de cliente vai pro repositório (LGPD).
+data/*
+!data/.gitkeep
+
+# Dependências e build
+node_modules/
+dist/
+*.exe
+*.zip
+
+# Logs e temporários
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+scratch/
+tmp/
