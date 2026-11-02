@@ -52,7 +52,7 @@ export function montarEnvelope(perfil, papel, envio, opcoes) {
   const acao = opcoes.soapAction ? opcoes.soapAction.replace('{ns}', opcoes.nsServico).replace('{op}', op) : '';
   const headers = soap12
     ? { 'Content-Type': `application/soap+xml; charset=utf-8${acao ? `; action="${acao}"` : ''}` }
-    : { 'Content-Type': 'text/xml; charset=utf-8', ...(opcoes.soapAction !== '' ? { SOAPAction: `"${acao}"` } : {}) };
+    : { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: `"${acao}"` }; // SOAP 1.1: cabeçalho sempre presente (vazio = "")
   return { corpo, headers };
 }
 
@@ -81,6 +81,24 @@ function acharTextoXml(obj, nomeResposta) {
     if (r) return r;
   }
   return undefined;
+}
+
+/**
+ * Classifica as MensagemRetorno de uma consulta sem notas.
+ * A ordem importa: "Assinatura ... não encontrada" é ERRO, não "nenhuma nota encontrada".
+ */
+export function classificarMensagens(mensagens) {
+  const texto = mensagens.map((m) => `${m.codigo} ${m.mensagem}`).join(' | ');
+  if (/assinatura|assinad|signature/i.test(texto)) return { texto, codigo: 'DADO_INCONSISTENTE', subcodigo: 'ASSINATURA_EXIGIDA' };
+  if (/certificad|autoriz|permiss|n[ãa]o\s+habilitad|procura[çc]|credencia/i.test(texto)) return { texto, codigo: 'ERRO_AUTENTICACAO', subcodigo: 'ACESSO_NEGADO' };
+  const semNotas =
+    /nenhum[ao]?\s+(nfs-?e|nota|registro|documento|resultado)/i.test(texto) ||
+    /(nfs-?e|notas?|registros?|documentos?|resultados?)\b[^|]{0,60}?n[ãa]o\s+(foi\s+|foram\s+)?(encontrad|localizad)/i.test(texto) ||
+    /n[ãa]o\s+(foi|foram)\s+(encontrad|localizad)[ao]s?\s+(nfs-?e|notas?|registros?|documentos?)/i.test(texto) ||
+    /n[ãa]o\s+(h[áa]|existe[m]?)\s+(nfs-?e|notas?|registros?|documentos?)/i.test(texto) ||
+    /sem\s+(registros?|notas?|nfs-?e|movimento)/i.test(texto);
+  if (semNotas) return { texto, vazio: true };
+  return { texto, codigo: 'DADO_INCONSISTENTE', subcodigo: 'MENSAGEM_RETORNO' };
 }
 
 const comoLista = (v) => (v === undefined || v === null ? [] : Array.isArray(v) ? v : [v]);
@@ -150,12 +168,9 @@ export function lerResposta(perfil, papel, { status, corpo }) {
   const compNfse = [...textoResposta.matchAll(/<((?:[\w-]+:)?)CompNfse[\s>][\s\S]*?<\/\1CompNfse>/g)].map((m) => m[0]);
 
   if (!compNfse.length && mensagens.length) {
-    const tudo = mensagens.map((m) => `${m.codigo} ${m.mensagem}`).join(' | ');
-    if (/n[ãa]o\s+(foi\s+|foram\s+)?encontrad|nenhum|inexist|sem\s+(registro|nota)/i.test(tudo)) {
-      return { compNfse: [], proximaPagina: null, mensagens };
-    }
-    const auth = /certificad|autoriz|permiss|n[ãa]o\s+habilitad|procura/i.test(tudo);
-    throw new ErroConector(auth ? 'ERRO_AUTENTICACAO' : 'DADO_INCONSISTENTE', auth ? 'ACESSO_NEGADO' : 'MENSAGEM_RETORNO', `A prefeitura recusou a consulta: ${tudo.slice(0, 400)}`, { status, resposta: bruto });
+    const c = classificarMensagens(mensagens);
+    if (c.vazio) return { compNfse: [], proximaPagina: null, mensagens };
+    throw new ErroConector(c.codigo, c.subcodigo, `A prefeitura recusou a consulta: ${c.texto.slice(0, 400)}`, { status, resposta: bruto });
   }
 
   return { compNfse, proximaPagina: prox && /^\d+$/.test(prox) ? Number(prox) : null, mensagens };

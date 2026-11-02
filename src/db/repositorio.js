@@ -300,7 +300,9 @@ export class Repositorio {
            (SELECT x.codigo FROM execucoes x WHERE x.empresa_id = v.empresa_id AND x.tipo = 'busca_municipal'
               AND json_extract(x.detalhes, '$.vinculo_id') = v.id ORDER BY x.id DESC LIMIT 1) AS ultimo_codigo,
            (SELECT x.fim FROM execucoes x WHERE x.empresa_id = v.empresa_id AND x.tipo = 'busca_municipal'
-              AND json_extract(x.detalhes, '$.vinculo_id') = v.id ORDER BY x.id DESC LIMIT 1) AS ultima_execucao
+              AND json_extract(x.detalhes, '$.vinculo_id') = v.id ORDER BY x.id DESC LIMIT 1) AS ultima_execucao,
+           (SELECT x.mensagem FROM execucoes x WHERE x.empresa_id = v.empresa_id AND x.tipo = 'busca_municipal'
+              AND json_extract(x.detalhes, '$.vinculo_id') = v.id ORDER BY x.id DESC LIMIT 1) AS ultima_mensagem
          FROM vinculos_municipais v JOIN municipios m ON m.ibge = v.ibge JOIN empresas e ON e.id = v.empresa_id
          ${cond.length ? 'WHERE ' + cond.join(' AND ') : ''} ORDER BY e.razao_social, m.nome`,
       )

@@ -11,6 +11,7 @@ import { catalogoRegras } from '../fiscal/regras.js';
 import { CATALOGO, SUBCODIGOS } from '../execucao/catalogo.js';
 import { listaPerfis, OPCOES_PADRAO, PERFIS, sanitizarOpcoes } from '../conectores/abrasf/perfis.js';
 import { sincronizarMunicipal, testarVinculo } from '../conectores/sincronizacao.js';
+import { MUNICIPIOS_CONHECIDOS, municipioConhecido, difereDaRecomendada } from '../conectores/municipios-conhecidos.js';
 import { registrarAuditoria, verificarAuditoria, listarAuditoria, exportarAuditoria } from '../auditoria.js';
 import { conciliarEmpresa } from '../portal/conciliacao.js';
 import { lerXmlSalvo, excluirXmlsDaEmpresa } from '../nfse/armazenamento.js';
@@ -233,7 +234,22 @@ export function criarServidor(repo, opcoes = {}) {
     // ---------- prefeituras (conectores municipais) ----------
     ['GET', /^\/api\/perfis$/, (req, res) => json(res, 200, { perfis: listaPerfis(), opcoesPadrao: OPCOES_PADRAO })],
 
-    ['GET', /^\/api\/municipios$/, (req, res) => json(res, 200, repo.listarMunicipios())],
+    ['GET', /^\/api\/municipios$/, (req, res) =>
+      json(res, 200, repo.listarMunicipios().map((m) => ({ ...m, recomendacao_disponivel: difereDaRecomendada(m) })))],
+
+    ['GET', /^\/api\/municipios\/conhecidos$/, (req, res) =>
+      json(res, 200, Object.keys(MUNICIPIOS_CONHECIDOS).map((ibge) => municipioConhecido(ibge)))],
+
+    // Aplica a configuração conhecida (perfil, URL e envelope) mantendo o que o sistema aprendeu (ex.: assinatura)
+    ['POST', /^\/api\/municipios\/(\d{7})\/recomendada$/, (req, res, [ibge]) => {
+      const r = municipioConhecido(ibge);
+      if (!r) throw new ErroHttp(404, 'Não há configuração conhecida para este município.');
+      const atual = repo.obterMunicipio(ibge);
+      const opcoes = { ...r.opcoes, ...(atual?.opcoes?.assinarConsulta ? { assinarConsulta: true } : {}) };
+      const m = repo.salvarMunicipio({ ibge, nome: r.nome, uf: r.uf, perfil: r.perfil, url: r.url, opcoes, observacoes: r.observacoes });
+      registrarAuditoria(repo.db, { tipo: 'municipio.salvo', payload: { ibge, nome: m.nome, perfil: m.perfil, url: m.url, opcoes, origem: 'configuracao_recomendada' } });
+      json(res, 200, m);
+    }],
 
     ['POST', /^\/api\/municipios$/, async (req, res) => {
       const b = await lerCorpo(req);
@@ -262,7 +278,11 @@ export function criarServidor(repo, opcoes = {}) {
       json(res, 200, { ok: true });
     }],
 
-    ['GET', /^\/api\/vinculos$/, (req, res, _, q) => json(res, 200, repo.listarVinculos({ empresaId: q.get('empresa') || undefined }))],
+    ['GET', /^\/api\/vinculos$/, (req, res, _, q) =>
+      json(res, 200, repo.listarVinculos({ empresaId: q.get('empresa') || undefined }).map((v) => {
+        const m = repo.obterMunicipio(v.ibge);
+        return { ...v, assinar_consulta: !!m?.opcoes?.assinarConsulta, recomendacao_disponivel: difereDaRecomendada(m) };
+      }))],
 
     ['POST', /^\/api\/vinculos$/, async (req, res) => {
       const b = await lerCorpo(req);

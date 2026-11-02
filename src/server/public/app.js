@@ -894,14 +894,17 @@ async function carregarVinculos() {
             <b>${esc(v.municipio_nome)}${v.uf ? '/' + esc(v.uf) : ''}</b>
             ${st ? `<span class="pilula ${classeStatus(st.tipo)}">${esc(st.rotulo)}</span>` : '<span class="pilula">nunca buscado</span>'}
             ${v.ativo ? '' : '<span class="pilula">inativo</span>'}
+            ${v.assinar_consulta ? '<span class="pilula sem-ponto" title="Consultas enviadas com assinatura digital (XMLDSig)">assinada</span>' : ''}
             <div class="meta">IBGE ${esc(v.ibge)} · ${esc(v.perfil)}${v.inscricao_municipal ? ` · IM ${esc(v.inscricao_municipal)}` : ''} · consultado até ${v.ultima_data ? dataBR(v.ultima_data) : '—'}</div>
             <div class="meta">${esc(v.url)}</div>
+            ${v.ultimo_codigo && !['SUCESSO', 'SEM_MOVIMENTO'].includes(v.ultimo_codigo) && v.ultima_mensagem ? `<div class="meta ultima-msg">Última busca: ${esc(v.ultima_mensagem)}</div>` : ''}
           </div>
           <div class="div-acoes">
             <button class="botao secundario pequeno" data-vacao="testar">Testar conexão</button>
             <button class="botao pequeno" data-vacao="buscar">${icone('play')}Buscar agora</button>
             <button class="botao-fantasma perigo pequeno" data-vacao="remover" title="Remover vínculo">${icone('x')}</button>
           </div>
+          ${v.recomendacao_disponivel ? `<div class="recomendacao"><span>Existe uma <b>configuração conhecida</b> para ${esc(v.municipio_nome)} diferente da cadastrada (versão, URL ou envelope SOAP).</span><button class="botao pequeno" data-vacao="recomendada" data-ibge="${esc(v.ibge)}">Aplicar configuração recomendada</button></div>` : ''}
           <div class="resultado oculto"></div>
         </div>`;
       }).join('')
@@ -909,6 +912,24 @@ async function carregarVinculos() {
 }
 
 $('#vinc-municipio').addEventListener('change', (ev) => $('#novo-municipio').classList.toggle('oculto', ev.target.value !== NOVO_MUNICIPIO));
+
+// Município com configuração conhecida: preenche tudo ao digitar o IBGE
+let conhecidos = null;
+$('#form-vinculo').novo_ibge.addEventListener('input', async (ev) => {
+  const ibge = ev.target.value.replace(/\D/g, '');
+  if (ibge.length !== 7) return;
+  conhecidos ??= await api('/api/municipios/conhecidos');
+  const c = conhecidos.find((m) => m.ibge === ibge);
+  if (!c) return;
+  const f = $('#form-vinculo');
+  f.novo_nome.value = c.nome;
+  f.novo_uf.value = c.uf;
+  f.novo_perfil.value = c.perfil;
+  f.novo_url.value = c.url;
+  for (const [k, v] of Object.entries(c.opcoes)) if (f[`op_${k}`]) f[`op_${k}`].value = v;
+  f.op_semSoapAction.checked = c.opcoes.soapAction === '';
+  avisar(`Configuração conhecida de ${c.nome} preenchida (${c.perfil}).`);
+});
 
 $('#form-vinculo').addEventListener('submit', async (ev) => {
   ev.preventDefault();
@@ -957,6 +978,10 @@ $('#lista-vinculos').addEventListener('click', async (ev) => {
       const r = await api(`/api/vinculos/${id}/buscar`, { metodo: 'POST', corpo: {} });
       avisar(`${r.mensagem} Acompanhe em Execuções.`);
       setTimeout(atualizar, 600);
+    } else if (b.dataset.vacao === 'recomendada') {
+      await api(`/api/municipios/${b.dataset.ibge}/recomendada`, { metodo: 'POST' });
+      avisar('Configuração recomendada aplicada. Clique em “Testar conexão”.');
+      await carregarVinculos();
     } else if (b.dataset.vacao === 'remover') {
       if (!confirm('Remover este vínculo? As notas já baixadas continuam no sistema.')) return;
       await api(`/api/vinculos/${id}`, { metodo: 'DELETE' });

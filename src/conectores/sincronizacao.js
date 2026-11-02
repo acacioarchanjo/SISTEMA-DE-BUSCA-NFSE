@@ -120,6 +120,7 @@ export async function sincronizarMunicipal(repo, vinculoId, opcoes = {}) {
     }
     estado.requisicoes = conector.requisicoes ?? 0;
     estado.falhasTransitorias = conector.falhasTransitorias ?? [];
+    if (conector.assinaturaDetectada) lembrarAssinatura(repo, municipio);
 
     let validacao = null;
     try {
@@ -161,6 +162,14 @@ export async function sincronizarMunicipal(repo, vinculoId, opcoes = {}) {
   }
 }
 
+/** A prefeitura exigiu consulta assinada: grava no cadastro do município para as próximas buscas. */
+function lembrarAssinatura(repo, municipio) {
+  const atual = repo.obterMunicipio(municipio.ibge);
+  if (atual?.opcoes?.assinarConsulta) return;
+  repo.salvarMunicipio({ ...atual, opcoes: { ...atual.opcoes, assinarConsulta: true } });
+  registrarAuditoria(repo.db, { tipo: 'municipio.assinatura_detectada', payload: { ibge: municipio.ibge, nome: municipio.nome } });
+}
+
 /** Testa a configuração de um vínculo (consulta mínima, sem gravar nada). */
 export async function testarVinculo(repo, vinculoId, { criarConector = criarConectorMunicipal } = {}) {
   const vinculo = repo.obterVinculo(vinculoId);
@@ -168,7 +177,9 @@ export async function testarVinculo(repo, vinculoId, { criarConector = criarCone
   const municipio = repo.obterMunicipio(vinculo.ibge);
   const conector = criarConector({ municipio, credenciais: abrirCredenciais(repo, vinculo.empresa_id), inscricaoMunicipal: vinculo.inscricao_municipal });
   try {
-    return { ...(await conector.testar()), capacidades: conector.capacidades(), conector: conector.id };
+    const r = await conector.testar();
+    if (r.assinaturaDetectada) lembrarAssinatura(repo, municipio);
+    return { ...r, capacidades: conector.capacidades(), conector: conector.id };
   } finally {
     conector.fechar();
   }
