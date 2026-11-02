@@ -118,7 +118,8 @@ export async function sincronizarMunicipal(repo, vinculoId, opcoes = {}) {
         }
       }
       } catch (e) {
-        if (!(e instanceof ErroConector)) throw e;
+        // nenhuma consulta passou ainda (prefeitura fora, certificado recusado…): não adianta tentar o outro papel
+        if (!(e instanceof ErroConector) || !(conector.sucessos > 0)) throw e;
         // guarda o que já veio e segue para o outro papel; se nenhum papel funcionar, o erro sobe
         c.erro = e.message;
         estado.falhasPapel.push({ papel, erro: e });
