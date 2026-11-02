@@ -547,7 +547,7 @@ $('#lista-execucoes').addEventListener('click', async (ev) => {
         <dt>Prefeitura</dt><dd>${esc(det.municipio?.nome ?? '—')}${det.municipio?.uf ? '/' + esc(det.municipio.uf) : ''} · ${esc(det.perfil ?? '')}</dd>
         <dt>Período</dt><dd>${dataBR(det.periodo?.de)} a ${dataBR(det.periodo?.ate)}</dd>
         <dt>Consultas feitas</dt><dd>${numero(x.lotes)}</dd>
-        ${Object.entries(det.por_papel ?? {}).map(([p, v]) => `<dt>Notas ${esc(p)}</dt><dd>${typeof v !== 'object' ? 'não disponível neste município' : v.erro ? `<span class="texto-erro">falhou: ${esc(v.erro)}</span>${v.notas ? ` (${numero(v.notas)} recebida(s) antes)` : ''}` : `${numero(v.notas)} (${numero(v.novas)} nova(s))`}</dd>`).join('')}`
+        ${Object.entries(det.por_papel ?? {}).map(([p, v]) => `<dt>Notas ${esc(p)}</dt><dd>${typeof v !== 'object' ? 'não disponível neste município' : v.diasComFalha ? `${numero(v.notas)} (${numero(v.novas)} nova(s)) · <span class="texto-erro">${numero(v.diasComFalha)} dia(s) com erro da prefeitura: ${esc(v.erro)}</span>` : v.erro ? `<span class="texto-erro">falhou: ${esc(v.erro)}</span>${v.notas ? ` (${numero(v.notas)} recebida(s) antes)` : ''}` : `${numero(v.notas)} (${numero(v.novas)} nova(s))`}</dd>`).join('')}`
         : `<dt>Lotes / notas novas</dt><dd>${numero(x.lotes)} / ${numero(x.novos)}</dd>
         <dt>Eventos novos</dt><dd>${numero(x.eventos)}</dd>`}
         ${det.cursor ? `<dt>NSU</dt><dd>${numero(det.cursor.de)} → ${numero(det.cursor.ate)}</dd>` : ''}
