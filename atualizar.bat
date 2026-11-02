@@ -66,7 +66,13 @@ if not "%VERSAO_NOVA%"=="" if "%VERSAO_NOVA%"=="%VERSAO_ATUAL%" (
 )
 
 REM ---- 2) Backup automatico antes de atualizar ----
-if exist "node_modules\" if exist ".env" (
+REM (se as dependencias estao quebradas, o sistema nunca rodou: nao ha o que salvar)
+node -e "require('dotenv');require('better-sqlite3')" >nul 2>nul
+if errorlevel 1 (
+  echo [AVISO] Instalacao atual incompleta - pulando o backup automatico.
+  goto baixar
+)
+if exist ".env" (
   echo.
   echo Fazendo backup dos dados antes de atualizar...
   node src\cli\index.js backup
@@ -77,6 +83,7 @@ if exist "node_modules\" if exist ".env" (
 )
 
 REM ---- 3) Baixa a versao nova ----
+:baixar
 echo.
 if exist ".git\" (
   where git >nul 2>nul

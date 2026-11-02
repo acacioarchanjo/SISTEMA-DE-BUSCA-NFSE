@@ -54,8 +54,8 @@ Um robô **100% local** que baixa automaticamente as **NFS-e (Notas Fiscais de S
 
 ## 🚀 Como rodar
 
-Requisitos: **Node.js 20+**. No Windows, se o `npm install` reclamar do `better-sqlite3`, instale as
-"Ferramentas de Build do Visual Studio" (C++) ou use o Node LTS, que costuma ter binário pronto.
+Requisitos: **Node.js 22 ou mais novo** (22, 24 e 26 funcionam; o banco `better-sqlite3` 13 já vem compilado
+para Windows, Linux e macOS, sem precisar de Visual Studio).
 
 ```bash
 # 1) instalar dependências
@@ -84,9 +84,9 @@ do próprio certificado). Depois clique em **▶ Buscar** pra baixar as NFS-e. A
 
 ### Windows: duplo clique
 
-Depois de instalar o Node.js 22 LTS, dê **duplo clique em `iniciar.bat`**. Ele:
-1. confere se o Node está instalado (versão 20 ou mais nova);
-2. roda `npm install` na primeira vez;
+Depois de instalar o Node.js (versão 22 ou mais nova), dê **duplo clique em `iniciar.bat`**. Ele:
+1. confere se o Node está instalado (versão 22 ou mais nova);
+2. roda `npm install` na primeira vez, ou de novo se a instalação estiver incompleta;
 3. cria o `.env` e gera a `NFSE_MASTER_KEY` automaticamente (**faça backup do `.env`**);
 4. abre o navegador no painel e sobe o sistema.
 
