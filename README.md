@@ -227,6 +227,18 @@ npm run cli -- auditoria exportar -o auditoria.json
 - ⚠️ É base de **conferência**. Na Reinf, a série R-4000 é declarada pela **data do pagamento/crédito**, não pela
   competência da nota. Ajuste o mês pelo financeiro antes de transmitir. O sistema não transmite nada à Receita.
 
+### Importação no Domínio Escrita Fiscal (local)
+
+- **Pacote Domínio** (tela **Notas**, botão *Pacote Domínio*; ou `exportar-mes.bat` → formato 2; ou
+  `npm run cli -- exportar --mes 2026-09 --dominio`): ZIP com os XMLs **originais** separados como a importação
+  de XML do Domínio pede, ou seja, **por empresa → mês → tomadas/prestadas → padrão do XML**
+  (`padrao-nacional` ou `municipal-IBGE-cidade`, porque cada padrão usa um modelo de importação diferente).
+- Canceladas e substituídas vão para `NAO-IMPORTAR-canceladas-substituidas`, fora das pastas de importação.
+- `conferencia-dominio.csv` traz a quantidade de notas e os totais por pasta (serviços, ISS, ISS retido, IRRF, PIS, COFINS,
+  CSLL, INSS), para bater com o relatório do Domínio depois de importar. O `LEIA-ME.txt` traz o passo a passo.
+- **Leiaute texto "Domínio Sistemas com Separador"** (registros 0000/1000/1020…): ainda não gerado, porque precisa da
+  especificação oficial da Central de Soluções Domínio para não ser recusado na importação.
+
 ### Windows: busca automática diária
 
 1. Rode o `iniciar.bat` uma vez e cadastre as empresas.

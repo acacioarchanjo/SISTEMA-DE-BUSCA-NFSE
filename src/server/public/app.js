@@ -505,6 +505,13 @@ $$('#filtros input[type=radio], #filtros select').forEach((el) =>
 $('#pag-ant').addEventListener('click', () => { pagina--; carregarNotas(); });
 $('#pag-prox').addEventListener('click', () => { pagina++; carregarNotas(); });
 $('#btn-csv').addEventListener('click', () => { location.href = `/api/exportar/csv?${paramsFiltro()}`; });
+$('#btn-dominio').addEventListener('click', async () => {
+  const p = paramsFiltro();
+  const { totais } = await api(`/api/documentos?${p}&limite=1`);
+  if (!totais.quantidade) return avisar('Nenhuma nota para exportar com esses filtros.', 'erro');
+  avisar(`Gerando pacote do Domínio com ${numero(totais.quantidade)} nota(s)…`);
+  location.href = `/api/exportar/dominio?${p}`;
+});
 $('#btn-zip').addEventListener('click', async () => {
   const p = paramsFiltro();
   if ($('#zip-pdf').checked) p.set('pdf', '1');

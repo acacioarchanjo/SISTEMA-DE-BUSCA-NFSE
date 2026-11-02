@@ -48,8 +48,13 @@ echo.
 set EMPRESA=
 set /p EMPRESA=Empresa (id ou CNPJ; Enter = todas): 
 
+set FORMATO=1
+echo.
+echo  Formato: 1 = ZIP padrao (XMLs + planilha)   2 = Pacote para o Dominio Escrita Fiscal
+set /p FORMATO=Formato (1/2) [1]: 
+
 set PDF=N
-set /p PDF=Incluir PDF de cada nota? (S/N) [N]: 
+if not "%FORMATO%"=="2" set /p PDF=Incluir PDF de cada nota? (S/N) [N]: 
 
 set ARGS=exportar --mes %MES%
 set NOME=nfse-%MES%
@@ -62,6 +67,8 @@ set ARGS=%ARGS% --empresa %EMPRESA%
 set NOME=%NOME%-empresa-%EMP_ARQ%
 :sem_empresa
 if /i "%PDF%"=="S" set ARGS=%ARGS% --pdf
+if "%FORMATO%"=="2" set ARGS=%ARGS% --dominio
+if "%FORMATO%"=="2" set NOME=dominio-%NOME%
 set SAIDA=exportacoes\%NOME%.zip
 
 if exist "%SAIDA%" del "%SAIDA%"
