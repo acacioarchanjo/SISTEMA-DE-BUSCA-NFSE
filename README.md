@@ -239,6 +239,19 @@ npm run cli -- auditoria exportar -o auditoria.json
 - **Leiaute texto "Domínio Sistemas com Separador"** (registros 0000/1000/1020…): ainda não gerado, porque precisa da
   especificação oficial da Central de Soluções Domínio para não ser recusado na importação.
 
+### Google Drive (pasta espelho)
+
+- Botão **Google Drive** na barra lateral. Instale o **Google Drive para computador** (ele cria a unidade `G:`), crie uma pasta,
+  por exemplo `G:\Meu Drive\NFS-e` ou uma pasta num Drive compartilhado do escritório, e cole o caminho. O sistema **não usa
+  senha nem API do Google**: grava na pasta, e o aplicativo do Drive sobe para a nuvem.
+- Estrutura: `CNPJ - Empresa/AAAA/AAAA-MM/Tomadas|Prestadas/{chave}.xml` (+ PDF opcional), `Canceladas/` e, por mês,
+  `planilha-AAAA-MM.csv` e `retencoes-AAAA-MM.csv`.
+- **Automático depois de cada busca** (ADN e prefeituras) e **incremental**: só grava o que mudou. Nota cancelada depois
+  é movida para `Canceladas`, e arquivo apagado por engano volta na próxima cópia. Se o Drive estiver desconectado, a busca
+  continua normalmente e o erro aparece na janela do Google Drive, com um ponto vermelho no botão.
+- Também funciona com OneDrive, Dropbox ou uma pasta de rede. Também dá para configurar pelo `.env` com `NFSE_PASTA_DRIVE`.
+- ⚠️ Os XMLs têm dados fiscais de clientes. Compartilhe a pasta no Drive só com quem precisa (LGPD).
+
 ### Windows: busca automática diária
 
 1. Rode o `iniciar.bat` uma vez e cadastre as empresas.

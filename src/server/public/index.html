@@ -26,6 +26,7 @@
     <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20zM12 10v4M12 17h.01"/></symbol>
     <symbol id="i-percent" viewBox="0 0 24 24"><path d="M19 5 5 19"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 9.5a4.25 4.25 0 0 1-.5 8.5z"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></symbol>
     <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
     <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
@@ -52,6 +53,7 @@
       </nav>
       <div class="lateral-rodape">
         <div class="ambiente"><span class="ponto"></span>Ambiente <b id="ambiente">—</b></div>
+        <button id="btn-drive" class="botao-fantasma" title="Copiar as notas para o Google Drive"><svg><use href="#i-cloud"/></svg><span>Google Drive</span><i id="drive-ponto" class="ponto-drive oculto"></i></button>
         <button id="btn-tema" class="botao-fantasma" title="Alternar tema claro/escuro"><svg><use href="#i-moon"/></svg><span>Tema</span></button>
         <button id="btn-encerrar" class="botao-fantasma perigo" title="Fecha o sistema (o servidor em segundo plano)"><svg><use href="#i-power"/></svg><span>Encerrar</span></button>
       </div>
@@ -425,6 +427,39 @@
       <menu>
         <button type="button" class="botao secundario" data-fechar>Cancelar</button>
         <button type="submit" class="botao">Conciliar</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-drive" class="modal largo">
+    <form id="form-drive" method="dialog">
+      <div class="modal-topo">
+        <h3>Google Drive</h3>
+        <button type="button" class="botao-fantasma icone-so" data-fechar title="Fechar"><svg><use href="#i-x"/></svg></button>
+      </div>
+      <p class="dica"><span>As notas são copiadas, organizadas, para uma pasta do <b>Google Drive para computador</b>, e o próprio Drive envia para a nuvem. O sistema não pede a sua senha do Google.</span></p>
+      <ol class="passos-drive">
+        <li>Instale e entre no <b>Google Drive para computador</b> (drive.google.com/download). Ele cria a unidade <b>G:</b> no Windows.</li>
+        <li>No Explorador de Arquivos, crie uma pasta, por exemplo <code>G:\Meu Drive\NFS-e</code> (ou dentro de um Drive compartilhado do escritório).</li>
+        <li>Cole o caminho abaixo e clique em <b>Salvar</b>.</li>
+      </ol>
+      <label class="campo"><span>Pasta no Google Drive</span><input name="pasta" placeholder="G:\Meu Drive\NFS-e" autocomplete="off" spellcheck="false"></label>
+      <label class="check"><input type="checkbox" name="automatico" checked> copiar automaticamente depois de cada busca</label>
+      <label class="check"><input type="checkbox" name="pdf"> incluir o PDF (DANFSe) de cada nota</label>
+      <pre class="estrutura-drive">NFS-e/
+  11.222.333/0001-81 - EMPRESA/
+    2026/
+      2026-09/
+        Tomadas/       XMLs (e PDFs) das notas tomadas
+        Prestadas/     XMLs (e PDFs) das notas prestadas
+        Canceladas/    notas canceladas (movidas para cá)
+        planilha-2026-09.csv
+        retencoes-2026-09.csv</pre>
+      <div id="drive-status" class="drive-status"></div>
+      <p id="erro-drive" class="erro"></p>
+      <menu>
+        <button type="button" class="botao secundario" id="btn-drive-agora">Copiar agora</button>
+        <button type="submit" class="botao">Salvar</button>
       </menu>
     </form>
   </dialog>

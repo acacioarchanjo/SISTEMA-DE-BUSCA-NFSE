@@ -12,6 +12,7 @@ import { validarDocumentos } from '../fiscal/validacao.js';
 import { REGRAS_VERSAO } from '../fiscal/regras.js';
 import { criarConectorMunicipal } from './registro.js';
 import { METODO, ErroConector } from './contrato.js';
+import { espelharDepoisDaBusca } from '../espelho/drive.js';
 
 const DIA = 86_400_000;
 const isoDia = (d) => d.toISOString().slice(0, 10);
@@ -179,6 +180,7 @@ export async function sincronizarMunicipal(repo, vinculoId, opcoes = {}) {
     throw e;
   } finally {
     conector?.fechar?.();
+    await espelharDepoisDaBusca(repo, empresa.id, { dataDir, origem: 'busca_municipal' });
   }
 }
 

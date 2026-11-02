@@ -23,6 +23,7 @@ import { ErroCofre } from '../crypto/cofre.js';
 import { ErroParser } from '../nfse/parser.js';
 import { consolidarRetencoes, gerarCsvRetencoes, FILTROS_RETENCAO } from '../fiscal/retencoes.js';
 import { gerarPacoteDominio } from '../exportador/dominio.js';
+import { lerPreferencias, salvarPreferencias, sincronizarEspelho, ErroEspelho } from '../espelho/drive.js';
 
 const PUBLICO = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 // Módulos usados tanto pelo servidor/CLI quanto pelo navegador (mesma regra nos dois lados).
@@ -113,6 +114,7 @@ export function criarServidor(repo, opcoes = {}) {
   const dataDir = opcoes.dataDir ?? config.dataDir;
   const hostsPermitidos = new Set(['localhost', '127.0.0.1', '[::1]', config.servidor.host]);
 
+  let espelhoRodando = false;
   const emSegundoPlano = (fn) => {
     Promise.resolve()
       .then(fn)
@@ -335,6 +337,40 @@ export function criarServidor(repo, opcoes = {}) {
       if (repo.execucaoEmAndamento(v.empresa_id)) throw new ErroHttp(409, 'Já existe uma busca em andamento para esta empresa.');
       emSegundoPlano(() => sincronizarMunicipalFn(repo, v.id, { de: b.de || undefined, ate: b.ate || undefined, dataDir }));
       json(res, 202, { ok: true, mensagem: `Busca em ${v.municipio_nome} iniciada.` });
+    }],
+
+    ['GET', /^\/api\/espelho$/, (req, res) => json(res, 200, { ...lerPreferencias(repo.db), rodando: espelhoRodando })],
+
+    ['POST', /^\/api\/espelho$/, async (req, res) => {
+      const b = await lerCorpo(req);
+      try {
+        const p = salvarPreferencias(repo.db, { pasta: b.pasta, pdf: b.pdf, automatico: b.automatico });
+        registrarAuditoria(repo.db, { tipo: 'espelho.configurado', payload: { pasta: p.pasta, pdf: p.pdf, automatico: p.automatico } });
+        json(res, 200, { ...p, rodando: espelhoRodando });
+      } catch (e) {
+        if (e instanceof ErroEspelho) throw new ErroHttp(400, e.message);
+        throw e;
+      }
+    }],
+
+    ['POST', /^\/api\/espelho\/sincronizar$/, (req, res) => {
+      const p = lerPreferencias(repo.db);
+      if (!p.pasta) throw new ErroHttp(400, 'Configure a pasta do Google Drive primeiro.');
+      if (espelhoRodando) throw new ErroHttp(409, 'A cópia para o Google Drive já está em andamento.');
+      espelhoRodando = true;
+      emSegundoPlano(async () => {
+        try {
+          await sincronizarEspelho(repo, { dataDir, origem: 'manual' });
+        } catch (e) {
+          // erro (ex.: Drive desconectado) fica no "último resultado"
+          repo.db.prepare(`INSERT INTO configuracoes (chave, valor) VALUES ('espelho.ultimo', ?)
+            ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor, atualizado_em = datetime('now')`)
+            .run(JSON.stringify({ em: new Date().toISOString(), origem: 'manual', pasta: p.pasta, erro: e.message, total_erros: 1, erros: [e.message] }));
+        } finally {
+          espelhoRodando = false;
+        }
+      });
+      json(res, 202, { ok: true, mensagem: 'Copiando as notas para a pasta do Google Drive…' });
     }],
 
     ['GET', /^\/api\/catalogo$/, (req, res) => json(res, 200, { status: CATALOGO, subcodigos: SUBCODIGOS, regras: catalogoRegras() })],
