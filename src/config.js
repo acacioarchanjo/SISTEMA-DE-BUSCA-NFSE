@@ -52,6 +52,12 @@ export const config = {
     basePath: env('NFSE_PORTAL_BASE_PATH', '/EmissorNacional'),
   },
 
+  // Conectores municipais (prefeituras)
+  municipal: {
+    retroativoDias: Number(env('NFSE_MUNICIPAL_RETROATIVO_DIAS', '90')), // 1ª busca: quantos dias para trás
+    sobreposicaoDias: Number(env('NFSE_MUNICIPAL_SOBREPOSICAO_DIAS', '5')), // buscas seguintes: reconsulta os últimos N dias
+  },
+
   masterKey: env('NFSE_MASTER_KEY', ''),
 
   servidor: {

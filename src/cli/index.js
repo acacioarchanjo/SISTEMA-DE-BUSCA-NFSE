@@ -18,7 +18,9 @@ import { formatarCnpj, somenteDigitos, dataBR } from '../util/formatos.js';
 import { validarDocumentos } from '../fiscal/validacao.js';
 import { catalogoRegras } from '../fiscal/regras.js';
 import { CATALOGO } from '../execucao/catalogo.js';
-import { verificarAuditoria, listarAuditoria, exportarAuditoria } from '../auditoria.js';
+import { verificarAuditoria, listarAuditoria, exportarAuditoria, registrarAuditoria } from '../auditoria.js';
+import { listaPerfis, PERFIS, sanitizarOpcoes, OPCOES_PADRAO } from '../conectores/abrasf/perfis.js';
+import { sincronizarMunicipal, testarVinculo } from '../conectores/sincronizacao.js';
 
 const repo = () => new Repositorio(obterBanco());
 
@@ -207,6 +209,111 @@ programa
       console.log(`Auditoria exportada para ${saida}`);
     } else {
       throw new Error('Ação inválida. Use: verificar | listar | exportar');
+    }
+  });
+
+// ---------- prefeituras (conectores municipais) ----------
+programa
+  .command('perfis')
+  .description('lista os perfis de webservice municipal suportados e as opções configuráveis')
+  .action(() => {
+    console.table(listaPerfis());
+    console.log('Opções (padrão):', OPCOES_PADRAO);
+  });
+
+programa
+  .command('municipios')
+  .description('lista os municípios cadastrados (webservices de prefeituras)')
+  .action(() => {
+    const lista = repo().listarMunicipios();
+    if (!lista.length) return console.log('Nenhum município cadastrado. Use: municipio <ibge> --nome ... --perfil ... --url ...');
+    console.table(lista.map((m) => ({ ibge: m.ibge, municipio: `${m.nome}${m.uf ? '/' + m.uf : ''}`, perfil: m.perfil, url: m.url, vinculos: m.vinculos, opcoes: JSON.stringify(m.opcoes) })));
+  });
+
+programa
+  .command('municipio <ibge>')
+  .description('cadastra/atualiza o webservice de uma prefeitura')
+  .requiredOption('--nome <nome>', 'nome do município')
+  .requiredOption('--perfil <perfil>', `perfil (${Object.keys(PERFIS).join(' | ')})`)
+  .requiredOption('--url <url>', 'endpoint HTTPS do webservice')
+  .option('--uf <uf>', 'UF')
+  .option('--opcao <chave=valor...>', 'opções do envelope (ex.: soapVersao=1.2 estilo=direto janelaDias=15)')
+  .action((ibge, o) => {
+    if (!/^\d{7}$/.test(ibge)) throw new Error('Código IBGE deve ter 7 dígitos.');
+    if (!PERFIS[o.perfil]) throw new Error(`Perfil inválido. Use: ${Object.keys(PERFIS).join(', ')}`);
+    if (!o.url.startsWith('https://')) throw new Error('O webservice precisa ser HTTPS.');
+    const opcoes = sanitizarOpcoes(Object.fromEntries((o.opcao ?? []).map((kv) => { const i = kv.indexOf('='); return [kv.slice(0, i), kv.slice(i + 1)]; })));
+    const r = repo();
+    const m = r.salvarMunicipio({ ibge, nome: o.nome, uf: o.uf?.toUpperCase() ?? null, perfil: o.perfil, url: o.url, opcoes });
+    registrarAuditoria(r.db, { tipo: 'municipio.salvo', payload: { ibge, nome: m.nome, perfil: m.perfil, url: m.url, opcoes } });
+    console.log(`✔ ${m.nome} (${m.ibge}) salvo: ${m.perfil} em ${m.url}`);
+  });
+
+programa
+  .command('vincular <empresa> <ibge>')
+  .description('passa a consultar as notas da empresa nesta prefeitura')
+  .option('--im <inscricao>', 'inscrição municipal da empresa no município')
+  .option('--desativar', 'mantém o vínculo, mas sem buscar')
+  .action((ref, ibge, o) => {
+    const r = repo();
+    const e = empresaPor(r, ref);
+    if (!r.obterMunicipio(ibge)) throw new Error(`Município ${ibge} não cadastrado. Use o comando "municipio" antes.`);
+    const id = r.salvarVinculo({ empresaId: e.id, ibge, inscricaoMunicipal: o.im ?? null, ativo: !o.desativar });
+    registrarAuditoria(r.db, { tipo: 'vinculo.salvo', empresaCnpj: e.cnpj, payload: { vinculo_id: id, empresa_id: e.id, ibge, inscricao_municipal: o.im ?? null, ativo: !o.desativar } });
+    console.log(`✔ ${e.razao_social} vinculada a ${r.obterMunicipio(ibge).nome} (vínculo #${id}).`);
+  });
+
+programa
+  .command('desvincular <empresa> <ibge>')
+  .description('para de consultar a empresa nesta prefeitura (as notas já baixadas continuam)')
+  .action((ref, ibge) => {
+    const r = repo();
+    const e = empresaPor(r, ref);
+    const v = r.listarVinculos({ empresaId: e.id }).find((x) => x.ibge === ibge);
+    if (!v) throw new Error('Vínculo não encontrado.');
+    r.excluirVinculo(v.id);
+    registrarAuditoria(r.db, { tipo: 'vinculo.excluido', empresaCnpj: e.cnpj, payload: { vinculo_id: v.id, ibge, municipio: v.municipio_nome } });
+    console.log(`✔ Vínculo com ${v.municipio_nome} removido.`);
+  });
+
+programa
+  .command('testar-prefeitura <empresa> <ibge>')
+  .description('testa URL, envelope e certificado com uma consulta mínima (não grava nada)')
+  .action(async (ref, ibge) => {
+    const r = repo();
+    const e = empresaPor(r, ref);
+    const v = r.listarVinculos({ empresaId: e.id }).find((x) => x.ibge === ibge);
+    if (!v) throw new Error('Vínculo não encontrado.');
+    try {
+      const t = await testarVinculo(r, v.id);
+      console.log(`✔ ${t.mensagem}`);
+    } catch (err) {
+      console.log(`✖ [${err.codigo ?? 'ERRO'}${err.subcodigo ? '/' + err.subcodigo : ''}] ${err.message}`);
+      if (CATALOGO[err.codigo]?.acao) console.log(`    → ${CATALOGO[err.codigo].acao}`);
+      if (err.resposta) console.log(`    Resposta da prefeitura (início): ${err.resposta.slice(0, 300)}`);
+      process.exitCode = 1;
+    }
+  });
+
+programa
+  .command('buscar-prefeitura [empresa]')
+  .description('baixa as notas das prefeituras vinculadas (uma empresa ou todas)')
+  .option('--de <data>', 'AAAA-MM-DD (padrão: desde a última busca, ou 90 dias na primeira)')
+  .option('--ate <data>', 'AAAA-MM-DD (padrão: hoje)')
+  .action(async (ref, o) => {
+    const r = repo();
+    const empresaId = ref ? empresaPor(r, ref).id : undefined;
+    const vinculos = r.listarVinculos({ empresaId, somenteAtivos: true });
+    if (!vinculos.length) return console.log('Nenhuma prefeitura vinculada. Use os comandos "municipio" e "vincular".');
+    for (const v of vinculos) {
+      try {
+        const x = await sincronizarMunicipal(r, v.id, { de: o.de, ate: o.ate });
+        console.log(`✔ ${v.empresa_nome} — ${v.municipio_nome} [${x.codigo}]: ${x.mensagem}`);
+      } catch (err) {
+        console.log(`✖ ${v.empresa_nome} — ${v.municipio_nome} [${err.codigo ?? 'ERRO'}]: ${err.message}`);
+        if (CATALOGO[err.codigo]?.acao) console.log(`    → ${CATALOGO[err.codigo].acao}`);
+        process.exitCode = 1;
+      }
     }
   });
 

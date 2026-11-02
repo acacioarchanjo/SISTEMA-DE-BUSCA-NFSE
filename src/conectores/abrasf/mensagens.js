@@ -1,0 +1,162 @@
+// Montagem das requisições SOAP e leitura das respostas ABRASF.
+import { XMLParser } from 'fast-xml-parser';
+import { ErroConector } from '../contrato.js';
+
+const parser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: '@',
+  removeNSPrefix: true,
+  parseTagValue: false,
+  trimValues: true,
+});
+
+export const escaparXml = (s) =>
+  String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]);
+
+const tag = (nome, conteudo) => (conteudo === undefined || conteudo === null || conteudo === '' ? '' : `<${nome}>${conteudo}</${nome}>`);
+const docTag = (doc) => (String(doc).length === 11 ? tag('Cpf', doc) : tag('Cnpj', doc));
+
+/**
+ * Corpo da consulta (o XML "Envio" do padrão).
+ * @param {object} perfil
+ * @param {'prestadas'|'tomadas'} papel
+ * @param {{cnpj:string, im?:string, de:string, ate:string, pagina?:number, periodo:'emissao'|'competencia'}} q
+ */
+export function montarEnvio(perfil, papel, q) {
+  const op = perfil.operacoes[papel];
+  const periodo = `<${q.periodo === 'competencia' ? 'PeriodoCompetencia' : 'PeriodoEmissao'}>${tag('DataInicial', q.de)}${tag('DataFinal', q.ate)}</${q.periodo === 'competencia' ? 'PeriodoCompetencia' : 'PeriodoEmissao'}>`;
+  if (perfil.versao === '1.00') {
+    // 1.00: Prestador(Cnpj, InscricaoMunicipal) obrigatório; só emissão
+    return `<${op.envio} xmlns="${perfil.namespace}"><Prestador>${tag('Cnpj', q.cnpj)}${tag('InscricaoMunicipal', q.im)}</Prestador><PeriodoEmissao>${tag('DataInicial', q.de)}${tag('DataFinal', q.ate)}</PeriodoEmissao></${op.envio}>`;
+  }
+  const id = `<CpfCnpj>${docTag(q.cnpj)}</CpfCnpj>${tag('InscricaoMunicipal', q.im)}`;
+  if (papel === 'prestadas') {
+    return `<${op.envio} xmlns="${perfil.namespace}"><Prestador>${id}</Prestador>${periodo}${tag('Pagina', q.pagina ?? 1)}</${op.envio}>`;
+  }
+  // tomadas: o consulente é a própria empresa, filtrando como tomadora
+  return `<${op.envio} xmlns="${perfil.namespace}"><Consulente>${id}</Consulente>${periodo}<Tomador>${id}</Tomador>${tag('Pagina', q.pagina ?? 1)}</${op.envio}>`;
+}
+
+/** Envelope SOAP conforme as opções do município. Devolve { corpo, headers }. */
+export function montarEnvelope(perfil, papel, envio, opcoes) {
+  const op = perfil.operacoes[papel].soap;
+  const elemento = opcoes.elementoOperacao.replace('{op}', op);
+  const embutir = (xml) => (opcoes.embutir === 'cdata' ? `<![CDATA[${xml}]]>` : escaparXml(xml));
+  const cabecalho = `<cabecalho versao="${perfil.versao}" xmlns="${perfil.namespace}"><versaoDados>${perfil.versao}</versaoDados></cabecalho>`;
+  const conteudo = opcoes.estilo === 'direto'
+    ? envio
+    : `<nfseCabecMsg>${embutir(cabecalho)}</nfseCabecMsg><nfseDadosMsg>${embutir(envio)}</nfseDadosMsg>`;
+  const soap12 = opcoes.soapVersao === '1.2';
+  const nsEnv = soap12 ? 'http://www.w3.org/2003/05/soap-envelope' : 'http://schemas.xmlsoap.org/soap/envelope/';
+  const corpo = `<?xml version="1.0" encoding="UTF-8"?><soap:Envelope xmlns:soap="${nsEnv}"><soap:Body><${elemento} xmlns="${opcoes.nsServico}">${conteudo}</${elemento}></soap:Body></soap:Envelope>`;
+  const acao = opcoes.soapAction ? opcoes.soapAction.replace('{ns}', opcoes.nsServico).replace('{op}', op) : '';
+  const headers = soap12
+    ? { 'Content-Type': `application/soap+xml; charset=utf-8${acao ? `; action="${acao}"` : ''}` }
+    : { 'Content-Type': 'text/xml; charset=utf-8', ...(opcoes.soapAction !== '' ? { SOAPAction: `"${acao}"` } : {}) };
+  return { corpo, headers };
+}
+
+/** Busca profunda pela primeira chave com o nome dado. */
+export function achar(obj, nome) {
+  if (!obj || typeof obj !== 'object') return undefined;
+  if (Array.isArray(obj)) {
+    for (const i of obj) { const r = achar(i, nome); if (r !== undefined) return r; }
+    return undefined;
+  }
+  if (Object.prototype.hasOwnProperty.call(obj, nome)) return obj[nome];
+  for (const [k, v] of Object.entries(obj)) {
+    if (k.startsWith('@')) continue;
+    const r = achar(v, nome);
+    if (r !== undefined) return r;
+  }
+  return undefined;
+}
+
+/** Procura uma string que contenha o XML da resposta (estilo "outputXML"/"return" com XML escapado). */
+function acharTextoXml(obj, nomeResposta) {
+  if (typeof obj === 'string') return obj.includes(nomeResposta) && obj.includes('<') ? obj : undefined;
+  if (!obj || typeof obj !== 'object') return undefined;
+  for (const v of Array.isArray(obj) ? obj : Object.values(obj)) {
+    const r = acharTextoXml(v, nomeResposta);
+    if (r) return r;
+  }
+  return undefined;
+}
+
+const comoLista = (v) => (v === undefined || v === null ? [] : Array.isArray(v) ? v : [v]);
+const texto = (v) => (v && typeof v === 'object' ? v['#text'] ?? '' : v ?? '');
+
+/**
+ * Lê a resposta HTTP de uma consulta.
+ * @returns {{ compNfse: string[], proximaPagina: number|null, mensagens: Array<{codigo,mensagem,correcao}> }}
+ * Lança ErroConector já classificado.
+ */
+export function lerResposta(perfil, papel, { status, corpo }) {
+  const bruto = Buffer.isBuffer(corpo) ? corpo.toString('utf8') : String(corpo ?? '');
+  const nomeResposta = perfil.operacoes[papel].resposta;
+
+  if (/^\s*<!doctype html|^\s*<html/i.test(bruto)) {
+    throw new ErroConector(status >= 500 || status === 404 ? 'PORTAL_INDISPONIVEL' : 'MUDANCA_LAYOUT', 'HTML_NO_LUGAR_DE_XML',
+      `A prefeitura devolveu uma página HTML (HTTP ${status}) em vez de XML: serviço em manutenção ou URL errada.`, { status, resposta: bruto, temporario: status >= 500 });
+  }
+  if (status === 401 || status === 403) {
+    throw new ErroConector('ERRO_AUTENTICACAO', 'ACESSO_NEGADO', `Acesso negado pela prefeitura (HTTP ${status}). Confira o certificado e se ele está habilitado no município.`, { status, resposta: bruto });
+  }
+  if (status === 429) throw new ErroConector('LIMITE_CONSUMO', 'CONSUMO_INDEVIDO', 'A prefeitura limitou as consultas (HTTP 429).', { status });
+
+  let envelope;
+  try {
+    envelope = parser.parse(bruto);
+  } catch {
+    throw new ErroConector(status >= 500 ? 'PORTAL_INDISPONIVEL' : 'MUDANCA_LAYOUT', 'RESPOSTA_INESPERADA', `Resposta não é XML válido (HTTP ${status}).`, { status, resposta: bruto, temporario: status >= 500 });
+  }
+
+  const fault = achar(envelope, 'Fault');
+  if (fault) {
+    const msg = texto(achar(fault, 'faultstring')) || texto(achar(fault, 'Text')) || texto(achar(fault, 'Reason')) || 'erro SOAP';
+    const auth = /certificad|autoriz|permiss|credencia|acesso negado/i.test(msg);
+    throw new ErroConector(auth ? 'ERRO_AUTENTICACAO' : 'DADO_INCONSISTENTE', auth ? 'ACESSO_NEGADO' : 'SOAP_FAULT', `Erro SOAP da prefeitura: ${String(msg).slice(0, 300)}`, { status, resposta: bruto });
+  }
+  if (status >= 500) {
+    throw new ErroConector('PORTAL_INDISPONIVEL', 'SERVIDOR_FORA', `Servidor da prefeitura com erro (HTTP ${status}).`, { status, resposta: bruto, temporario: true });
+  }
+
+  // A resposta pode vir como XML direto no Body ou como texto (XML escapado) dentro de um elemento.
+  let textoResposta = bruto;
+  let resposta = achar(envelope, nomeResposta);
+  if (resposta === undefined || typeof resposta === 'string') {
+    const embutido = typeof resposta === 'string' ? resposta : acharTextoXml(envelope, nomeResposta);
+    if (embutido) {
+      textoResposta = embutido;
+      resposta = achar(parser.parse(embutido), nomeResposta);
+    }
+  }
+  if (resposta === undefined) {
+    // Alguns sistemas devolvem só ListaMensagemRetorno/ListaNfse sem o elemento raiz esperado
+    const alternativa = achar(envelope, 'ListaNfse') !== undefined || achar(envelope, 'ListaMensagemRetorno') !== undefined;
+    if (!alternativa) {
+      throw new ErroConector('MUDANCA_LAYOUT', 'RESPOSTA_INESPERADA', `A resposta não contém ${nomeResposta}. Confira a versão ABRASF e o estilo do envelope do município.`, { status, resposta: bruto });
+    }
+    resposta = envelope;
+  }
+
+  const mensagens = comoLista(achar(achar(resposta, 'ListaMensagemRetorno') ?? {}, 'MensagemRetorno')).map((m) => ({
+    codigo: texto(m.Codigo), mensagem: texto(m.Mensagem), correcao: texto(m.Correcao),
+  }));
+  const lista = achar(resposta, 'ListaNfse');
+  const prox = lista ? texto(lista.ProximaPagina) : '';
+
+  // XML original de cada CompNfse (guardado como evidência e para reprocessar)
+  const compNfse = [...textoResposta.matchAll(/<((?:[\w-]+:)?)CompNfse[\s>][\s\S]*?<\/\1CompNfse>/g)].map((m) => m[0]);
+
+  if (!compNfse.length && mensagens.length) {
+    const tudo = mensagens.map((m) => `${m.codigo} ${m.mensagem}`).join(' | ');
+    if (/n[ãa]o\s+(foi\s+|foram\s+)?encontrad|nenhum|inexist|sem\s+(registro|nota)/i.test(tudo)) {
+      return { compNfse: [], proximaPagina: null, mensagens };
+    }
+    const auth = /certificad|autoriz|permiss|n[ãa]o\s+habilitad|procura/i.test(tudo);
+    throw new ErroConector(auth ? 'ERRO_AUTENTICACAO' : 'DADO_INCONSISTENTE', auth ? 'ACESSO_NEGADO' : 'MENSAGEM_RETORNO', `A prefeitura recusou a consulta: ${tudo.slice(0, 400)}`, { status, resposta: bruto });
+  }
+
+  return { compNfse, proximaPagina: prox && /^\d+$/.test(prox) ? Number(prox) : null, mensagens };
+}

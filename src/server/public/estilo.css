@@ -472,3 +472,24 @@ tr.clicavel { cursor: pointer; }
   .menu em { display: none; }
   .menu button.ativa em, .menu em.perigo:not(:empty) { display: inline; }
 }
+
+/* ---------- prefeituras ---------- */
+.lista-vinculos { display: flex; flex-direction: column; gap: 10px; }
+.vinculo { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 12px 14px; border: 1px solid var(--borda); border-radius: 12px; background: var(--superficie); }
+.vinculo b { font-weight: 600; }
+.vinculo .meta { color: var(--suave); font-size: 12px; overflow-wrap: anywhere; }
+.vinculo .resultado { grid-column: 1 / -1; font-size: 13px; padding: 8px 10px; border-radius: 8px; background: var(--superficie-2); }
+.vinculo .resultado.ok { background: var(--ok-suave); color: var(--ok); }
+.vinculo .resultado.erro { background: var(--erro-suave); color: var(--erro); }
+.form-vinculo { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.form-vinculo h4 { margin: 0; font-size: 14px; }
+.form-vinculo menu { display: flex; justify-content: flex-end; margin: 0; padding: 0; }
+.novo-municipio { border: 1px dashed var(--borda-forte); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 12px; margin: 0; }
+.novo-municipio legend { font-size: 12px; color: var(--suave); padding: 0 6px; }
+.linha-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.avancado summary { cursor: pointer; font-size: 13px; color: var(--texto-2); }
+.avancado[open] summary { margin-bottom: 10px; }
+.avancado small { color: var(--suave); }
+@media (max-width: 860px) { .linha-3 { grid-template-columns: 1fr; } .vinculo { grid-template-columns: 1fr; } }
+.situacao-conf { display: inline-flex; align-items: center; gap: 6px; }
+.resposta-bruta { white-space: pre-wrap; word-break: break-all; font: 11px ui-monospace, "Cascadia Mono", Consolas, monospace; background: var(--superficie-2); padding: 10px; border-radius: 8px; max-height: 220px; overflow: auto; margin: 0; }

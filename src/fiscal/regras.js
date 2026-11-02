@@ -195,6 +195,21 @@ export const REGRAS = [
       };
     },
   },
+  {
+    codigo: 'DUP-001',
+    titulo: 'Possível duplicidade entre ADN e prefeitura',
+    severidade: 'ALERTA',
+    fonte_legal: 'Conferência operacional (mesma prestação em duas fontes)',
+    vigencia_inicio: '2003-08',
+    avaliar(n, ctx) {
+      if (!ativa(n) || !ctx.duplicatas?.length) return null;
+      const outra = ctx.duplicatas[0];
+      return {
+        mensagem: `A mesma prestação (mesmo prestador, tomador, valor e data) também veio ${outra.sistema === 'abrasf' ? 'da prefeitura' : 'do ADN'} (nº ${outra.numero ?? '?'}). Confira se é a mesma nota para não contá-la duas vezes nos totais e na exportação.`,
+        detalhes: { outra_nota: { id: outra.id, numero: outra.numero, sistema: outra.sistema, chave: outra.chave } },
+      };
+    },
+  },
 ];
 
 /** Metadados públicos das regras (para o painel e a CLI). */

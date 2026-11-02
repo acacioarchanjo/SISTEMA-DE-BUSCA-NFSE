@@ -138,6 +138,41 @@ npm run cli -- importar-certificados C:\Certificados --senhas senhas.csv --simul
 ```
 (sem `--simular` grava; `--senha X` vale para os que não estão na planilha)
 
+### Prefeituras com webservice próprio (fase 2 do roteiro)
+
+Alguns municípios ainda não enviam todas as notas ao ADN. Para esses, o sistema consulta o **webservice da prefeitura
+no padrão ABRASF** (versões 1.00, 2.01, 2.02, 2.03 e 2.04), com o mesmo certificado A1 da empresa.
+
+**No painel:** Empresas → ⋯ → **Prefeituras (webservice municipal)…**
+1. Escolha um município já cadastrado ou **+ Cadastrar novo município**: código IBGE, nome, UF, versão ABRASF e
+   **URL do webservice** (está no manual de integração da prefeitura). Se o manual pedir, ajuste as
+   **opções avançadas** do envelope SOAP (versão SOAP, estilo, namespace, SOAPAction, período por emissão/competência).
+2. Informe a inscrição municipal, se o município exigir, e clique em **Vincular**.
+3. Clique em **Testar conexão**: o sistema faz uma consulta mínima e diz se URL, versão e certificado estão certos.
+4. **Buscar agora**, ou deixe para o **Buscar todas**/agendamento diário, que passa a consultar também as prefeituras.
+
+Como funciona:
+- Consulta **notas prestadas** e **tomadas** (a versão 1.00 do padrão só permite prestadas), quebrando o período em
+  janelas (30 dias por padrão) e seguindo a paginação. A primeira busca olha 90 dias para trás; as seguintes
+  continuam de onde pararam, reconsultando os últimos 5 dias (`NFSE_MUNICIPAL_RETROATIVO_DIAS`, `NFSE_MUNICIPAL_SOBREPOSICAO_DIAS`).
+- As notas entram no mesmo cadastro (origem *Prefeitura*), com **código de verificação**, passam pela **conferência
+  fiscal** e aparecem nas exportações. Cancelamentos informados pela prefeitura marcam a nota e geram o `CAN-001` quando for o caso.
+- Nova regra **`DUP-001`**: se a mesma prestação vier do ADN e da prefeitura (mesmo prestador, tomador, valor e dia),
+  as duas notas recebem um alerta para não serem contadas em dobro.
+- Erros da prefeitura entram no catálogo de status: *Portal indisponível* (com 3 tentativas), *Erro de autenticação*,
+  *Dado inconsistente* (SOAP Fault, MensagemRetorno) e o novo **Mudança no serviço** (resposta em formato inesperado —
+  versão ou URL errada). O trecho da resposta aparece no detalhe da execução.
+- Ainda **não suportado**: municípios que exigem **consulta assinada** (XMLDSig) e sistemas fora do padrão ABRASF
+  (ex.: São Paulo/Paulistana, DSF, GISS) — previstos nas próximas fases.
+
+```bash
+npm run cli -- perfis
+npm run cli -- municipio 4205407 --nome Florianópolis --uf SC --perfil abrasf-2.02 --url https://... [--opcao soapVersao=1.2]
+npm run cli -- vincular 11222333000181 4205407 --im 123456
+npm run cli -- testar-prefeitura 11222333000181 4205407
+npm run cli -- buscar-prefeitura [empresa] [--de 2026-01-01 --ate 2026-03-31]
+```
+
 ### Conferência fiscal e auditoria (fase 1 do roteiro)
 
 Depois de cada busca (ou importação), o sistema **confere as notas** contra regras nacionais do ISS e mostra o
@@ -152,6 +187,7 @@ resultado em **Conferência** (menu lateral), na coluna **Conf.** da lista de no
 | `ALQ-001` / `ALQ-002` | Alíquota abaixo de 2% (LC 157) / acima de 5% | Alerta / Bloqueante |
 | `CMP-001` | Nota emitida meses depois da competência | Informativa (Alerta se ≥ 3 meses) |
 | `CAN-001` | Nota cancelada/substituída **depois** do mês de competência (pode exigir retificação) | Bloqueante |
+| `DUP-001` | A mesma prestação veio do ADN **e** da prefeitura (possível contagem em dobro) | Alerta |
 
 O robô **aponta, não decide**: cada divergência pode ser **ignorada com justificativa** (lei municipal, imunidade…)
 ou reaberta, e isso fica registrado na auditoria. Se os dados da nota mudarem, as divergências são recalculadas.

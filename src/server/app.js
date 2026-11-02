@@ -9,6 +9,8 @@ import { sincronizarEmpresa, sincronizarTodas, importarXml } from '../adn/distri
 import { validarDocumentos } from '../fiscal/validacao.js';
 import { catalogoRegras } from '../fiscal/regras.js';
 import { CATALOGO, SUBCODIGOS } from '../execucao/catalogo.js';
+import { listaPerfis, OPCOES_PADRAO, PERFIS, sanitizarOpcoes } from '../conectores/abrasf/perfis.js';
+import { sincronizarMunicipal, testarVinculo } from '../conectores/sincronizacao.js';
 import { registrarAuditoria, verificarAuditoria, listarAuditoria, exportarAuditoria } from '../auditoria.js';
 import { conciliarEmpresa } from '../portal/conciliacao.js';
 import { lerXmlSalvo, excluirXmlsDaEmpresa } from '../nfse/armazenamento.js';
@@ -89,6 +91,8 @@ const hoje = () => new Date().toISOString().slice(0, 10);
 export function criarServidor(repo, opcoes = {}) {
   const sincronizar = opcoes.sincronizar ?? sincronizarEmpresa;
   const sincronizarLote = opcoes.sincronizarTodas ?? sincronizarTodas;
+  const sincronizarMunicipalFn = opcoes.sincronizarMunicipal ?? sincronizarMunicipal;
+  const testarVinculoFn = opcoes.testarVinculo ?? testarVinculo;
   const conciliar = opcoes.conciliar ?? conciliarEmpresa;
   const dataDir = opcoes.dataDir ?? config.dataDir;
   const hostsPermitidos = new Set(['localhost', '127.0.0.1', '[::1]', config.servidor.host]);
@@ -226,6 +230,78 @@ export function criarServidor(repo, opcoes = {}) {
     }],
 
     // ---------- catálogo, conferência fiscal e auditoria ----------
+    // ---------- prefeituras (conectores municipais) ----------
+    ['GET', /^\/api\/perfis$/, (req, res) => json(res, 200, { perfis: listaPerfis(), opcoesPadrao: OPCOES_PADRAO })],
+
+    ['GET', /^\/api\/municipios$/, (req, res) => json(res, 200, repo.listarMunicipios())],
+
+    ['POST', /^\/api\/municipios$/, async (req, res) => {
+      const b = await lerCorpo(req);
+      const ibge = String(b.ibge ?? '').replace(/\D/g, '');
+      if (ibge.length !== 7) throw new ErroHttp(400, 'Informe o código IBGE do município (7 dígitos).');
+      if (!String(b.nome ?? '').trim()) throw new ErroHttp(400, 'Informe o nome do município.');
+      if (!PERFIS[b.perfil]) throw new ErroHttp(400, `Perfil inválido. Use: ${Object.keys(PERFIS).join(', ')}`);
+      let url;
+      try { url = new URL(String(b.url ?? '')); } catch { throw new ErroHttp(400, 'URL do webservice inválida.'); }
+      if (url.protocol !== 'https:') throw new ErroHttp(400, 'O webservice precisa ser HTTPS.');
+      let opcoes;
+      try { opcoes = sanitizarOpcoes(b.opcoes); } catch (e) { throw new ErroHttp(400, e.message); }
+      const m = repo.salvarMunicipio({
+        ibge, nome: String(b.nome).trim(), uf: b.uf ? String(b.uf).trim().toUpperCase().slice(0, 2) : null,
+        perfil: b.perfil, url: url.toString(), opcoes, observacoes: b.observacoes ?? null,
+      });
+      registrarAuditoria(repo.db, { tipo: 'municipio.salvo', payload: { ibge, nome: m.nome, perfil: m.perfil, url: m.url, opcoes } });
+      json(res, 200, m);
+    }],
+
+    ['DELETE', /^\/api\/municipios\/(\d{7})$/, (req, res, [ibge]) => {
+      const m = repo.obterMunicipio(ibge);
+      if (!m) throw new ErroHttp(404, 'Município não encontrado.');
+      try { repo.excluirMunicipio(ibge); } catch (e) { throw new ErroHttp(400, e.message); }
+      registrarAuditoria(repo.db, { tipo: 'municipio.excluido', payload: { ibge, nome: m.nome } });
+      json(res, 200, { ok: true });
+    }],
+
+    ['GET', /^\/api\/vinculos$/, (req, res, _, q) => json(res, 200, repo.listarVinculos({ empresaId: q.get('empresa') || undefined }))],
+
+    ['POST', /^\/api\/vinculos$/, async (req, res) => {
+      const b = await lerCorpo(req);
+      const e = empresaOu404(b.empresa);
+      if (!repo.obterMunicipio(String(b.ibge ?? ''))) throw new ErroHttp(400, 'Cadastre o município antes de vincular.');
+      const id = repo.salvarVinculo({ empresaId: e.id, ibge: String(b.ibge), inscricaoMunicipal: b.inscricaoMunicipal ? String(b.inscricaoMunicipal).trim() : null, ativo: b.ativo !== false });
+      registrarAuditoria(repo.db, { tipo: 'vinculo.salvo', empresaCnpj: e.cnpj, payload: { vinculo_id: id, empresa_id: e.id, ibge: String(b.ibge), inscricao_municipal: b.inscricaoMunicipal ?? null, ativo: b.ativo !== false } });
+      json(res, 200, repo.obterVinculo(id));
+    }],
+
+    ['DELETE', /^\/api\/vinculos\/(\d+)$/, (req, res, [id]) => {
+      const v = repo.obterVinculo(Number(id));
+      if (!v) throw new ErroHttp(404, 'Vínculo não encontrado.');
+      repo.excluirVinculo(v.id);
+      registrarAuditoria(repo.db, { tipo: 'vinculo.excluido', empresaCnpj: v.empresa_cnpj, payload: { vinculo_id: v.id, ibge: v.ibge, municipio: v.municipio_nome } });
+      json(res, 200, { ok: true });
+    }],
+
+    ['POST', /^\/api\/vinculos\/(\d+)\/testar$/, async (req, res, [id]) => {
+      if (!repo.obterVinculo(Number(id))) throw new ErroHttp(404, 'Vínculo não encontrado.');
+      try {
+        json(res, 200, await testarVinculoFn(repo, Number(id)));
+      } catch (e) {
+        const c = e.codigo ? { codigo: e.codigo, subcodigo: e.subcodigo ?? null } : { codigo: 'ERRO_INTERNO', subcodigo: null };
+        json(res, 200, { ok: false, ...c, mensagem: e.message, acao: CATALOGO[c.codigo]?.acao ?? null });
+      }
+    }],
+
+    ['POST', /^\/api\/vinculos\/(\d+)\/buscar$/, async (req, res, [id]) => {
+      const v = repo.obterVinculo(Number(id));
+      if (!v) throw new ErroHttp(404, 'Vínculo não encontrado.');
+      const b = await lerCorpo(req);
+      const data = /^\d{4}-\d{2}-\d{2}$/;
+      if ((b.de && !data.test(b.de)) || (b.ate && !data.test(b.ate))) throw new ErroHttp(400, 'Datas no formato AAAA-MM-DD.');
+      if (repo.execucaoEmAndamento(v.empresa_id)) throw new ErroHttp(409, 'Já existe uma busca em andamento para esta empresa.');
+      emSegundoPlano(() => sincronizarMunicipalFn(repo, v.id, { de: b.de || undefined, ate: b.ate || undefined, dataDir }));
+      json(res, 202, { ok: true, mensagem: `Busca em ${v.municipio_nome} iniciada.` });
+    }],
+
     ['GET', /^\/api\/catalogo$/, (req, res) => json(res, 200, { status: CATALOGO, subcodigos: SUBCODIGOS, regras: catalogoRegras() })],
 
     ['GET', /^\/api\/divergencias$/, (req, res, _, q) => {
