@@ -25,6 +25,7 @@
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
     <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20zM12 10v4M12 17h.01"/></symbol>
+    <symbol id="i-percent" viewBox="0 0 24 24"><path d="M19 5 5 19"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></symbol>
     <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
     <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
@@ -46,6 +47,7 @@
         <button data-aba="empresas"><svg><use href="#i-building"/></svg><span>Empresas</span><em id="cont-empresas"></em></button>
         <button data-aba="notas"><svg><use href="#i-file"/></svg><span>Notas</span><em id="cont-notas"></em></button>
         <button data-aba="conferencia"><svg><use href="#i-shield"/></svg><span>Conferência</span><em id="cont-conferencia" class="perigo"></em></button>
+        <button data-aba="retencoes"><svg><use href="#i-percent"/></svg><span>Retenções</span></button>
         <button data-aba="execucoes"><svg><use href="#i-activity"/></svg><span>Execuções</span><i id="indicador-exec" class="pulso oculto"></i></button>
       </nav>
       <div class="lateral-rodape">
@@ -150,9 +152,23 @@
           <label class="campo-data"><span>Competência de</span><input type="date" name="de"></label>
           <label class="campo-data"><span>até</span><input type="date" name="ate"></label>
           <button type="submit" class="botao">Filtrar</button>
+          <div class="linha-filtro">
+            <span class="rotulo-filtro">Retenções</span>
+            <div class="segmentado quebra" role="radiogroup" aria-label="Retenções">
+              <label><input type="radio" name="retencao" value="" checked><span>Todas</span></label>
+              <label><input type="radio" name="retencao" value="qualquer"><span>Com retenção</span></label>
+              <label><input type="radio" name="retencao" value="iss"><span>ISS retido</span></label>
+              <label><input type="radio" name="retencao" value="federal"><span>Federais</span></label>
+              <label><input type="radio" name="retencao" value="irrf"><span>IRRF</span></label>
+              <label><input type="radio" name="retencao" value="csrf"><span>PIS/COFINS/CSLL</span></label>
+              <label><input type="radio" name="retencao" value="inss"><span>INSS</span></label>
+              <label><input type="radio" name="retencao" value="nenhuma"><span>Sem retenção</span></label>
+            </div>
+          </div>
         </form>
 
         <div id="totais" class="totais"></div>
+        <div id="totais-ret" class="totais totais-ret oculto"></div>
 
         <div class="cartao tabela-wrap">
           <table>
@@ -199,6 +215,39 @@
           <select name="empresa" id="conf-empresa"><option value="">Todas as empresas</option></select>
         </form>
         <div class="lista-div" id="lista-divergencias"></div>
+      </main>
+
+      <!-- RETENÇÕES / EFD-REINF -->
+      <main id="aba-retencoes" class="aba oculto">
+        <header class="cabecalho">
+          <div>
+            <h1>Retenções e EFD-Reinf</h1>
+            <p>Retenções das notas tomadas, somadas por fornecedor e mês. Base para os eventos R-4020 (PJ), R-4010 (PF) e R-2010 (INSS).</p>
+          </div>
+          <div class="acoes">
+            <button id="btn-reinf-csv" class="botao"><svg><use href="#i-download"/></svg>Planilha Reinf</button>
+          </div>
+        </header>
+        <form id="filtros-reinf" class="cartao filtros">
+          <select name="empresa" id="reinf-empresa"><option value="">Todas as empresas</option></select>
+          <label class="campo-data"><span>Competência de</span><input type="month" name="de"></label>
+          <label class="campo-data"><span>até</span><input type="month" name="ate"></label>
+          <button type="submit" class="botao">Filtrar</button>
+        </form>
+        <div class="aviso-reinf cartao">
+          <svg><use href="#i-alert"/></svg>
+          <span>Na EFD-Reinf, a série R-4000 é declarada pela <b>data do pagamento</b> ao fornecedor, não pela emissão da nota. Use esta tela para conferir. Antes de transmitir, ajuste o mês pelo financeiro e informe a natureza do rendimento.</span>
+        </div>
+        <div class="kpis kpis-3" id="reinf-kpis"></div>
+        <div class="cartao tabela-wrap">
+          <table>
+            <thead><tr>
+              <th>Competência</th><th>Fornecedor (beneficiário)</th><th>Evento</th><th class="num">Notas</th><th class="num">Valor bruto</th>
+              <th class="num">IRRF</th><th class="num">PIS/COFINS/CSLL</th><th class="num">INSS</th><th class="num">ISS retido</th><th></th>
+            </tr></thead>
+            <tbody id="lista-reinf"></tbody>
+          </table>
+        </div>
       </main>
 
       <!-- EXECUÇÕES -->

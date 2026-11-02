@@ -1,5 +1,6 @@
 // Acesso a dados: empresas, cursor NSU, documentos, eventos e execuções.
 import { registrarAuditoria } from '../auditoria.js';
+import { FILTROS_RETENCAO, SOMAS_RETENCAO_SQL } from '../fiscal/retencoes.js';
 
 const CAMPOS_DOC = [
   'empresa_id', 'chave', 'nsu', 'origem', 'papel', 'situacao', 'numero', 'data_emissao',
@@ -165,7 +166,8 @@ export class Repositorio {
     const totais = this.db
       .prepare(
         `SELECT COUNT(*) AS quantidade, COALESCE(SUM(valor_servico),0) AS valor_servico, COALESCE(SUM(valor_iss),0) AS valor_iss,
-          COALESCE(SUM(valor_total_retencoes),0) AS valor_retencoes, COALESCE(SUM(valor_liquido),0) AS valor_liquido
+          COALESCE(SUM(valor_total_retencoes),0) AS valor_retencoes, COALESCE(SUM(valor_liquido),0) AS valor_liquido,
+          ${SOMAS_RETENCAO_SQL}
          FROM documentos d ${where}`,
       )
       .get(params);
@@ -182,6 +184,10 @@ export class Repositorio {
     if (f.ate) { cond.push('d.competencia <= @ate'); params.ate = f.ate; }
     if (f.divergencia === 'bloqueante') cond.push("EXISTS (SELECT 1 FROM divergencias v WHERE v.documento_id = d.id AND v.status = 'aberta' AND v.severidade = 'BLOQUEANTE')");
     else if (f.divergencia === 'qualquer') cond.push("EXISTS (SELECT 1 FROM divergencias v WHERE v.documento_id = d.id AND v.status = 'aberta')");
+    if (f.retencao) {
+      if (!FILTROS_RETENCAO[f.retencao]) throw new Error(`Filtro de retenção inválido: ${f.retencao}`);
+      cond.push(FILTROS_RETENCAO[f.retencao]);
+    }
     if (f.busca) {
       cond.push(`(d.chave LIKE @busca OR d.numero LIKE @busca OR d.prestador_nome LIKE @busca OR d.tomador_nome LIKE @busca
         OR d.prestador_doc LIKE @busca OR d.tomador_doc LIKE @busca OR d.descricao LIKE @busca)`);

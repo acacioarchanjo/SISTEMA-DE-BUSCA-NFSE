@@ -21,6 +21,7 @@ import { gerarDanfse } from '../exportador/danfse.js';
 import { diasParaVencer, ErroCertificado } from '../crypto/certificado.js';
 import { ErroCofre } from '../crypto/cofre.js';
 import { ErroParser } from '../nfse/parser.js';
+import { consolidarRetencoes, gerarCsvRetencoes, FILTROS_RETENCAO } from '../fiscal/retencoes.js';
 
 const PUBLICO = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 // Módulos usados tanto pelo servidor/CLI quanto pelo navegador (mesma regra nos dois lados).
@@ -82,9 +83,22 @@ const filtrosDe = (q) => ({
   ate: q.get('ate') || undefined,
   busca: q.get('busca') || undefined,
   divergencia: q.get('divergencia') || undefined,
+  retencao: (() => {
+    const r = q.get('retencao') || undefined;
+    if (r && !Object.hasOwn(FILTROS_RETENCAO, r)) throw new ErroHttp(400, `Filtro de retenção inválido: ${r}`);
+    return r;
+  })(),
 });
 
 const hoje = () => new Date().toISOString().slice(0, 10);
+
+/** Filtro do relatório de retenções: empresa e meses AAAA-MM (400 se o formato for inválido). */
+function filtroRetencoes(q) {
+  const mes = /^\d{4}-\d{2}$/;
+  const f = { empresaId: q.get('empresa') || undefined, de: q.get('de') || undefined, ate: q.get('ate') || undefined };
+  if ((f.de && !mes.test(f.de)) || (f.ate && !mes.test(f.ate))) throw new ErroHttp(400, 'Meses no formato AAAA-MM.');
+  return f;
+}
 
 /**
  * Cria o servidor. `opcoes` permite injetar dependências nos testes.
@@ -387,6 +401,14 @@ export function criarServidor(repo, opcoes = {}) {
     ['GET', /^\/api\/documentos\/(\d+)\/pdf$/, async (req, res, [id]) => {
       const d = docOu404(id);
       arquivo(res, await gerarDanfse(d), 'application/pdf', `NFSe-${d.numero ?? d.chave}.pdf`);
+    }],
+
+    ['GET', /^\/api\/retencoes$/, (req, res, _, q) => json(res, 200, consolidarRetencoes(repo.db, filtroRetencoes(q)))],
+
+    ['GET', /^\/api\/exportar\/retencoes$/, (req, res, _, q) => {
+      const f = filtroRetencoes(q);
+      const nome = `retencoes-reinf-${f.de ?? 'inicio'}${f.ate && f.ate !== f.de ? `_a_${f.ate}` : ''}.csv`;
+      arquivo(res, Buffer.from(gerarCsvRetencoes(consolidarRetencoes(repo.db, f)), 'utf8'), 'text/csv; charset=utf-8', nome);
     }],
 
     ['GET', /^\/api\/exportar\/csv$/, (req, res, _, q) => {
