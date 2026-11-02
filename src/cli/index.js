@@ -22,6 +22,7 @@ import { verificarAuditoria, listarAuditoria, exportarAuditoria, registrarAudito
 import { listaPerfis, PERFIS, sanitizarOpcoes, OPCOES_PADRAO } from '../conectores/abrasf/perfis.js';
 import { sincronizarMunicipal, testarVinculo } from '../conectores/sincronizacao.js';
 import { municipioConhecido, MUNICIPIOS_CONHECIDOS } from '../conectores/municipios-conhecidos.js';
+import { gerarPacoteDominio } from '../exportador/dominio.js';
 
 const repo = () => new Repositorio(obterBanco());
 
@@ -393,6 +394,7 @@ programa
   .option('-p, --papel <papel>', 'emitida | recebida | intermediario')
   .option('--pdf', 'inclui DANFSe em PDF no ZIP')
   .option('--csv', 'gera só a planilha CSV')
+  .option('--dominio', 'pacote para importação no Domínio Escrita Fiscal (XMLs por empresa/mês/tipo/padrão + conferência)')
   .option('-o, --saida <arquivo>', 'arquivo de saída')
   .action(async (o) => {
     const r = repo();
@@ -409,7 +411,15 @@ programa
     const ext = o.csv ? 'csv' : 'zip';
     const saida = o.saida ?? `nfse-${o.mes ?? new Date().toISOString().slice(0, 10)}.${ext}`;
     if (path.dirname(saida)) fs.mkdirSync(path.dirname(saida), { recursive: true });
-    fs.writeFileSync(saida, o.csv ? gerarCsv(itens) : await gerarZip(itens, { incluirPdf: !!o.pdf }));
+    let conteudo;
+    if (o.csv) conteudo = gerarCsv(itens);
+    else if (o.dominio) {
+      const pac = await gerarPacoteDominio(itens);
+      conteudo = pac.buffer;
+      for (const g of pac.grupos) console.log(`  ${g.cnpj} ${g.mes} ${g.papel === 'recebida' ? 'tomadas ' : 'prestadas'} ${g.padrao}: ${g.notas} nota(s)`);
+      if (pac.faltando.length) console.log(`  ATENÇÃO: ${pac.faltando.length} XML(s) ausente(s) em disco — veja XML-AUSENTES.txt no pacote.`);
+    } else conteudo = await gerarZip(itens, { incluirPdf: !!o.pdf });
+    fs.writeFileSync(saida, conteudo);
     console.log(`${itens.length} nota(s) exportada(s) para ${saida}`);
   });
 

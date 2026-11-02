@@ -22,6 +22,7 @@ import { diasParaVencer, ErroCertificado } from '../crypto/certificado.js';
 import { ErroCofre } from '../crypto/cofre.js';
 import { ErroParser } from '../nfse/parser.js';
 import { consolidarRetencoes, gerarCsvRetencoes, FILTROS_RETENCAO } from '../fiscal/retencoes.js';
+import { gerarPacoteDominio } from '../exportador/dominio.js';
 
 const PUBLICO = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 // Módulos usados tanto pelo servidor/CLI quanto pelo navegador (mesma regra nos dois lados).
@@ -414,6 +415,13 @@ export function criarServidor(repo, opcoes = {}) {
     ['GET', /^\/api\/exportar\/csv$/, (req, res, _, q) => {
       const { itens } = repo.listarDocumentos({ ...filtrosDe(q), limite: 100_000 });
       arquivo(res, Buffer.from(gerarCsv(itens), 'utf8'), 'text/csv; charset=utf-8', `nfse-${hoje()}.csv`);
+    }],
+
+    ['GET', /^\/api\/exportar\/dominio$/, async (req, res, _, q) => {
+      const { itens } = repo.listarDocumentos({ ...filtrosDe(q), limite: 100_000 });
+      if (!itens.length) throw new ErroHttp(404, 'Nenhum documento para os filtros escolhidos.');
+      const { buffer } = await gerarPacoteDominio(itens, { dataDir });
+      arquivo(res, buffer, 'application/zip', `dominio-nfse-${hoje()}.zip`);
     }],
 
     ['GET', /^\/api\/exportar\/zip$/, async (req, res, _, q) => {
