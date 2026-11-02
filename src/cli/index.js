@@ -21,6 +21,7 @@ import { CATALOGO } from '../execucao/catalogo.js';
 import { verificarAuditoria, listarAuditoria, exportarAuditoria, registrarAuditoria } from '../auditoria.js';
 import { listaPerfis, PERFIS, sanitizarOpcoes, OPCOES_PADRAO } from '../conectores/abrasf/perfis.js';
 import { sincronizarMunicipal, testarVinculo } from '../conectores/sincronizacao.js';
+import { municipioConhecido, MUNICIPIOS_CONHECIDOS } from '../conectores/municipios-conhecidos.js';
 
 const repo = () => new Repositorio(obterBanco());
 
@@ -247,6 +248,24 @@ programa
     const m = r.salvarMunicipio({ ibge, nome: o.nome, uf: o.uf?.toUpperCase() ?? null, perfil: o.perfil, url: o.url, opcoes });
     registrarAuditoria(r.db, { tipo: 'municipio.salvo', payload: { ibge, nome: m.nome, perfil: m.perfil, url: m.url, opcoes } });
     console.log(`✔ ${m.nome} (${m.ibge}) salvo: ${m.perfil} em ${m.url}`);
+  });
+
+programa
+  .command('municipio-recomendado [ibge]')
+  .description('aplica a configuração conhecida de um município (sem ibge: lista os disponíveis)')
+  .action((ibge) => {
+    if (!ibge) {
+      console.table(Object.keys(MUNICIPIOS_CONHECIDOS).map((i) => { const m = municipioConhecido(i); return { ibge: i, municipio: `${m.nome}/${m.uf}`, perfil: m.perfil, url: m.url }; }));
+      return;
+    }
+    const rec = municipioConhecido(ibge);
+    if (!rec) throw new Error('Não há configuração conhecida para este município.');
+    const r = repo();
+    const atual = r.obterMunicipio(ibge);
+    const opcoes = { ...rec.opcoes, ...(atual?.opcoes?.assinarConsulta ? { assinarConsulta: true } : {}) };
+    r.salvarMunicipio({ ibge, nome: rec.nome, uf: rec.uf, perfil: rec.perfil, url: rec.url, opcoes, observacoes: rec.observacoes });
+    registrarAuditoria(r.db, { tipo: 'municipio.salvo', payload: { ibge, nome: rec.nome, perfil: rec.perfil, url: rec.url, opcoes, origem: 'configuracao_recomendada' } });
+    console.log(`✔ ${rec.nome}: configuração recomendada aplicada (${rec.perfil}, ${rec.url}).`);
   });
 
 programa

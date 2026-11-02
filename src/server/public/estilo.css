@@ -493,3 +493,5 @@ tr.clicavel { cursor: pointer; }
 @media (max-width: 860px) { .linha-3 { grid-template-columns: 1fr; } .vinculo { grid-template-columns: 1fr; } }
 .situacao-conf { display: inline-flex; align-items: center; gap: 6px; }
 .resposta-bruta { white-space: pre-wrap; word-break: break-all; font: 11px ui-monospace, "Cascadia Mono", Consolas, monospace; background: var(--superficie-2); padding: 10px; border-radius: 8px; max-height: 220px; overflow: auto; margin: 0; }
+.vinculo .recomendacao { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 12px; border-radius: 10px; background: var(--alerta-suave); font-size: 13px; }
+.vinculo .ultima-msg { color: var(--erro); }

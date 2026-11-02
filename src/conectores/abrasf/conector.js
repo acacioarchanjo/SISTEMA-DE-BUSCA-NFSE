@@ -6,6 +6,7 @@ import { montarEnvio, montarEnvelope, lerResposta } from './mensagens.js';
 import { parseCompNfse } from './parser.js';
 import { opcoesEfetivas } from './perfis.js';
 import { esperar } from '../../util/formatos.js';
+import { assinarXml } from '../assinatura.js';
 
 export const VERSAO_CONECTOR = '1.0.0';
 
@@ -40,6 +41,8 @@ export class ConectorAbrasf {
     this.aoRequisitar = teste.aoRequisitar ?? null;
     this.requisicoes = 0;
     this.falhasTransitorias = [];
+    this.assinar = !!this.opcoes.assinarConsulta;
+    this.assinaturaDetectada = false; // vira true se a prefeitura recusar consulta sem assinatura
 
     let url;
     try {
@@ -71,8 +74,28 @@ export class ConectorAbrasf {
     this.agent.destroy();
   }
 
-  /** Uma chamada SOAP com até 3 tentativas para falhas temporárias. */
+  /**
+   * Chamada com detecção de assinatura: se a prefeitura recusar a consulta por falta de assinatura,
+   * assina e tenta de novo uma vez (e o conector passa a assinar as próximas).
+   */
   async #chamar(papel, envio) {
+    try {
+      return await this.#chamarComRetentativa(papel, envio);
+    } catch (e) {
+      if (!this.assinar && e instanceof ErroConector && /assinatura|assinad|signature/i.test(`${e.message} ${e.resposta ?? ''}`)) {
+        this.assinar = true;
+        this.assinaturaDetectada = true;
+        return this.#chamarComRetentativa(papel, envio);
+      }
+      throw e;
+    }
+  }
+
+  /** Uma chamada SOAP com até 3 tentativas para falhas temporárias. */
+  async #chamarComRetentativa(papel, envioOriginal) {
+    const envio = this.assinar
+      ? assinarXml(envioOriginal, this.cred, { elemento: this.perfil.operacoes[papel].envio, algoritmo: this.opcoes.algoritmoAssinatura })
+      : envioOriginal;
     const { corpo, headers } = montarEnvelope(this.perfil, papel, envio, this.opcoes);
     let ultimo;
     for (let t = 0; t < 3; t++) {
@@ -121,9 +144,6 @@ export class ConectorAbrasf {
     if (!this.perfil.operacoes[papel]) {
       throw new ErroConector('ERRO_CONFIGURACAO', 'OPERACAO_NAO_SUPORTADA', `${this.perfil.nome} não permite consultar notas ${papel} pelo ${papel === 'tomadas' ? 'tomador' : 'prestador'}.`);
     }
-    if (this.opcoes.assinarConsulta) {
-      throw new ErroConector('ERRO_CONFIGURACAO', 'ASSINATURA_EXIGIDA', 'Este município exige consulta assinada (XMLDSig), ainda não suportada pelo conector.');
-    }
     for (const j of janelas(de, ate, Number(this.opcoes.janelaDias) || 30)) {
       let pagina = 1;
       while (pagina <= this.opcoes.maxPaginas) {
@@ -155,7 +175,9 @@ export class ConectorAbrasf {
     const r = await this.#chamar('prestadas', envio);
     return {
       ok: true,
-      mensagem: `Conexão OK com ${this.municipio.nome}: a prefeitura respondeu no formato ${this.perfil.nome} (${r.compNfse.length} nota(s) hoje${r.mensagens.length ? `; mensagem: ${r.mensagens[0].mensagem}` : ''}).`,
+      assinaturaDetectada: this.assinaturaDetectada,
+      mensagem: `Conexão OK com ${this.municipio.nome}: a prefeitura respondeu no formato ${this.perfil.nome} (${r.compNfse.length} nota(s) hoje${r.mensagens.length ? `; mensagem: ${r.mensagens[0].mensagem}` : ''}).` +
+        (this.assinaturaDetectada ? ' O município exige consulta assinada: a assinatura foi ativada automaticamente.' : this.assinar ? ' Consulta enviada assinada.' : ''),
     };
   }
 }

@@ -162,8 +162,12 @@ Como funciona:
 - Erros da prefeitura entram no catálogo de status: *Portal indisponível* (com 3 tentativas), *Erro de autenticação*,
   *Dado inconsistente* (SOAP Fault, MensagemRetorno) e o novo **Mudança no serviço** (resposta em formato inesperado —
   versão ou URL errada). O trecho da resposta aparece no detalhe da execução.
-- Ainda **não suportado**: municípios que exigem **consulta assinada** (XMLDSig) e sistemas fora do padrão ABRASF
-  (ex.: São Paulo/Paulistana, DSF, GISS) — previstos nas próximas fases.
+- **Consulta assinada** (XMLDSig, RSA-SHA1/C14N com o A1): se a prefeitura recusar a consulta por falta de assinatura,
+  o sistema assina, tenta de novo e passa a assinar sempre naquele município.
+- **Municípios com configuração pronta**: ao digitar o IBGE, versão, URL e envelope SOAP são preenchidos; se o cadastro
+  existente for diferente, aparece **Aplicar configuração recomendada**. Disponível: **Campinas/SP** (3509502, ABRASF 2.03,
+  sistema IMA). Liste com `npm run cli -- municipio-recomendado`.
+- Ainda **não suportado**: sistemas fora do padrão ABRASF (ex.: São Paulo/Paulistana, DSF, GISS) — próximas fases.
 
 ```bash
 npm run cli -- perfis

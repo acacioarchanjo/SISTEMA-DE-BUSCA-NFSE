@@ -86,7 +86,7 @@ export const SUBCODIGOS = {
   HTML_NO_LUGAR_DE_XML: 'A prefeitura devolveu uma página HTML (manutenção ou URL errada)',
   OPERACAO_NAO_SUPORTADA: 'Operação não disponível neste sistema',
   URL_INVALIDA: 'URL do webservice inválida',
-  ASSINATURA_EXIGIDA: 'O município exige consulta assinada (ainda não suportado)',
+  ASSINATURA_EXIGIDA: 'O município exige consulta assinada',
 };
 
 /**
