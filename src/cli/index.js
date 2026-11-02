@@ -11,6 +11,7 @@ import { conciliarEmpresa, mesAnterior } from '../portal/conciliacao.js';
 import { gerarZip } from '../exportador/zip.js';
 import { gerarCsv } from '../exportador/planilha.js';
 import { iniciarAgendador } from '../agendador.js';
+import { gerarBackup } from '../backup.js';
 import { formatarCnpj, somenteDigitos } from '../util/formatos.js';
 
 const repo = () => new Repositorio(obterBanco());
@@ -173,6 +174,25 @@ programa
     if (path.dirname(saida)) fs.mkdirSync(path.dirname(saida), { recursive: true });
     fs.writeFileSync(saida, o.csv ? gerarCsv(itens) : await gerarZip(itens, { incluirPdf: !!o.pdf }));
     console.log(`${itens.length} nota(s) exportada(s) para ${saida}`);
+  });
+
+programa
+  .command('backup')
+  .description('gera um ZIP com banco, XMLs, logs e .env (funciona com o painel aberto)')
+  .option('-d, --destino <pasta>', 'pasta onde salvar (padrão: ./backups)')
+  .option('--sem-env', 'não inclui o .env (a NFSE_MASTER_KEY deve ser guardada à parte)')
+  .option('--manter <n>', 'quantos backups manter na pasta (0 = todos)', '10')
+  .action(async (o) => {
+    const r = await gerarBackup({
+      destino: o.destino,
+      incluirEnv: !o.semEnv,
+      manter: Number(o.manter),
+      db: obterBanco(),
+    });
+    const mb = (r.tamanho / 1024 / 1024).toFixed(1);
+    console.log(`✔ Backup gerado: ${r.arquivo} (${mb} MB, ${r.arquivos} arquivo(s))`);
+    if (!r.incluiuEnv) console.log('⚠ O .env NÃO foi incluído: guarde a NFSE_MASTER_KEY em local seguro.');
+    if (r.removidos.length) console.log(`  ${r.removidos.length} backup(s) antigo(s) removido(s).`);
   });
 
 programa

@@ -115,6 +115,19 @@ O ZIP vai para a pasta `exportacoes\` (ex.: `nfse-2026-03.zip`), com os XMLs org
 empresa/emitidas/recebidas e a `planilha-nfse.csv`, e a pasta abre sozinha no Explorer.
 A pasta `exportacoes/` fica fora do Git, porque contém dados de clientes.
 
+### Windows: backup dos dados
+
+Dê **duplo clique em `backup-dados.bat`**. Ele pergunta a pasta de destino (padrão: `backups\` no projeto;
+pode ser um pendrive, HD externo ou pasta sincronizada com a nuvem) e se inclui o `.env`.
+
+- O ZIP (`backup-nfse-AAAA-MM-DD_HHMMSS.zip`) leva o banco, os XMLs, os logs e o `.env` com a `NFSE_MASTER_KEY`.
+- Pode rodar **com o painel aberto**: o banco é copiado pela API de backup do SQLite, então a cópia sai consistente.
+- Ficam os **10 backups mais recentes** na pasta de destino.
+- Para **restaurar**: feche o sistema, renomeie a pasta `data` atual e extraia o ZIP na pasta do projeto.
+  O passo a passo está no `LEIA-ME.txt` dentro do ZIP.
+- Para backup automático, agende `backup-dados.bat auto` no Agendador de Tarefas (roda sem perguntas e salva em `backups\`).
+- ⚠️ O backup tem dados de clientes e a chave que decifra os certificados: guarde em local protegido.
+
 ### Linha de comando
 
 ```bash
@@ -129,6 +142,7 @@ npm run cli -- exportar --mes 2026-03 --pdf               # ZIP do mês com XMLs
 npm run cli -- exportar --csv -e 1 -o marco.csv          # só a planilha
 npm run cli -- conciliar 1 --de 2026-03-01 --ate 2026-03-31       # (experimental) confere com o portal
 npm run cli -- agendar                                   # fica rodando conforme NFSE_ADN_CRON
+npm run cli -- backup --destino E:\\Backups              # ZIP com banco, XMLs, logs e .env
 ```
 
 ### Como a busca funciona
