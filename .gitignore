@@ -21,3 +21,6 @@ npm-debug.log*
 Thumbs.db
 scratch/
 tmp/
+
+# Exportações geradas (contêm dados de clientes)
+exportacoes/

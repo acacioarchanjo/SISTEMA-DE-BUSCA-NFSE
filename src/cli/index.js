@@ -149,6 +149,7 @@ programa
   .command('exportar')
   .description('gera ZIP (XMLs + planilha) ou CSV')
   .option('-e, --empresa <empresa>', 'id ou CNPJ')
+  .option('-m, --mes <AAAA-MM>', 'competência de um mês inteiro (atalho para --de/--ate)')
   .option('--de <data>', 'competência inicial AAAA-MM-DD')
   .option('--ate <data>', 'competência final AAAA-MM-DD')
   .option('-p, --papel <papel>', 'emitida | recebida | intermediario')
@@ -157,11 +158,19 @@ programa
   .option('-o, --saida <arquivo>', 'arquivo de saída')
   .action(async (o) => {
     const r = repo();
+    if (o.mes) {
+      const m = String(o.mes).match(/^(\d{4})-(\d{2})$/);
+      if (!m || Number(m[2]) < 1 || Number(m[2]) > 12) throw new Error(`Mês inválido: ${o.mes} (use AAAA-MM)`);
+      const ultimoDia = new Date(Date.UTC(Number(m[1]), Number(m[2]), 0)).getUTCDate();
+      o.de = `${o.mes}-01`;
+      o.ate = `${o.mes}-${String(ultimoDia).padStart(2, '0')}`;
+    }
     const empresaId = o.empresa ? empresaPor(r, o.empresa).id : undefined;
     const { itens } = r.listarDocumentos({ empresaId, de: o.de, ate: o.ate, papel: o.papel, limite: 100_000 });
     if (!itens.length) return console.log('Nenhuma nota para os filtros informados.');
     const ext = o.csv ? 'csv' : 'zip';
-    const saida = o.saida ?? `nfse-${new Date().toISOString().slice(0, 10)}.${ext}`;
+    const saida = o.saida ?? `nfse-${o.mes ?? new Date().toISOString().slice(0, 10)}.${ext}`;
+    if (path.dirname(saida)) fs.mkdirSync(path.dirname(saida), { recursive: true });
     fs.writeFileSync(saida, o.csv ? gerarCsv(itens) : await gerarZip(itens, { incluirPdf: !!o.pdf }));
     console.log(`${itens.length} nota(s) exportada(s) para ${saida}`);
   });
