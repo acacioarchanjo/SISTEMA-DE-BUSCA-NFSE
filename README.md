@@ -92,6 +92,18 @@ Depois de instalar o Node.js 22 LTS, dê **duplo clique em `iniciar.bat`**. Ele:
 
 Para encerrar, feche a janela preta ou aperte `Ctrl+C`.
 
+### Windows: busca automática diária
+
+1. Rode o `iniciar.bat` uma vez e cadastre as empresas.
+2. Dê **duplo clique em `agendar-busca-diaria.bat`**, informe o horário (padrão 03:00) e pronto: ele cria a tarefa
+   **"Buscador NFS-e - busca diaria"** no Agendador de Tarefas do Windows.
+3. Todo dia, nesse horário, o `busca-diaria.bat` busca as notas de **todas as empresas ativas**, sem precisar do
+   painel aberto. O resultado fica em `data\logs\busca-AAAA-MM-DD.log` (logs com mais de 90 dias são apagados).
+
+- O computador precisa estar ligado e com o usuário conectado no horário.
+- Se alguma empresa falhar, a tarefa termina com código 1 ("Último resultado" no Agendador).
+- Para remover: `agendar-busca-diaria.bat remover`.
+
 ### Linha de comando
 
 ```bash
