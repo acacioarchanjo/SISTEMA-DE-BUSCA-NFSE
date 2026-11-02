@@ -85,7 +85,11 @@ programa
   .action(async (ref, o) => {
     const r = repo();
     if (!ref) {
-      for (const x of await sincronizarTodas(r, { ignorarTrava: o.ignorarTrava })) console.log(`${x.ok ? '✔' : '✖'} ${x.empresa}: ${x.mensagem}`);
+      const resultados = await sincronizarTodas(r, { ignorarTrava: o.ignorarTrava });
+      if (!resultados.length) console.log('Nenhuma empresa ativa cadastrada.');
+      for (const x of resultados) console.log(`${x.ok ? '✔' : '✖'} ${x.empresa}: ${x.mensagem}`);
+      // código de saída ≠ 0 se alguma empresa falhou (aparece no Agendador de Tarefas)
+      if (resultados.some((x) => !x.ok)) process.exitCode = 1;
       return;
     }
     const e = empresaPor(r, ref);
