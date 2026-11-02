@@ -185,6 +185,10 @@ async function carregarEmpresas() {
   const atualConf = selConf.value;
   selConf.innerHTML = sel.innerHTML;
   selConf.value = atualConf;
+  const selReinf = $('#reinf-empresa');
+  const atualReinf = selReinf.value;
+  selReinf.innerHTML = sel.innerHTML;
+  selReinf.value = atualReinf;
 
   $('#lista-empresas').innerHTML = empresas.length
     ? empresas.map(cartaoEmpresa).join('')
@@ -375,6 +379,64 @@ async function buscarTodas() {
 $('#btn-buscar-todas').addEventListener('click', buscarTodas);
 $('#btn-buscar-todas-inicio').addEventListener('click', buscarTodas);
 
+// ---------------- Retenções / EFD-Reinf ----------------
+const paramsReinf = () => {
+  const p = new URLSearchParams();
+  for (const [k, v] of new FormData($('#filtros-reinf'))) if (v) p.set(k, v);
+  return p;
+};
+const mesBR = (m) => (m ? m.split('-').reverse().join('/') : '—');
+
+async function carregarRetencoes() {
+  const { linhas, totais } = await api(`/api/retencoes?${paramsReinf()}`);
+  const kpi = (t, v, s) => `<div class="cartao kpi"><div class="kpi-topo"><span class="kpi-icone">${icone('percent')}</span>${t}</div><b>${moeda(v)}</b><small>${esc(s)}</small></div>`;
+  $('#reinf-kpis').innerHTML =
+    kpi('IRRF retido', totais.ret_irrf, 'R-4020 / R-4010') +
+    kpi('PIS/COFINS/CSLL', totais.ret_csrf, `PIS ${moeda(totais.ret_pis)} · COFINS ${moeda(totais.ret_cofins)} · CSLL ${moeda(totais.ret_csll)}`) +
+    kpi('INSS retido', totais.ret_inss, 'R-2010') +
+    kpi('ISS retido', totais.ret_iss, `${numero(totais.notas)} nota(s) de ${numero(totais.beneficiarios)} fornecedor(es)`);
+  $('#lista-reinf').innerHTML = linhas.length
+    ? linhas.map((l) => `<tr>
+        <td>${mesBR(l.competencia)}${empresas.length > 1 ? `<span class="sub">${esc(l.empresa_nome)}</span>` : ''}</td>
+        <td class="nome"><b>${esc(l.beneficiario_nome ?? '—')}</b><span class="sub">${esc(doc(l.beneficiario_doc))} · ${l.beneficiario_tipo}</span></td>
+        <td>${l.eventos_reinf.length ? l.eventos_reinf.map((e) => `<span class="evento-reinf">${e}</span>`).join('') : '<span class="sub">só ISS</span>'}</td>
+        <td class="num">${numero(l.notas)}</td>
+        <td class="num">${moeda(l.valor_bruto)}</td>
+        <td class="num">${moeda(l.ret_irrf)}</td>
+        <td class="num">${moeda(l.ret_csrf)}</td>
+        <td class="num">${moeda(l.ret_inss)}</td>
+        <td class="num">${moeda(l.ret_iss)}</td>
+        <td><button class="icone-acao" data-reinf-notas="${esc(l.beneficiario_doc)}" data-mes="${esc(l.competencia ?? '')}" data-cnpj="${esc(l.empresa_cnpj)}" title="Ver as notas">${icone('search')}</button></td>
+      </tr>`).join('')
+    : '<tr><td colspan="10" class="vazio">Nenhuma nota tomada com retenção nesse período.</td></tr>';
+}
+
+$('#filtros-reinf').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  carregarRetencoes().catch((e) => avisar(e.message, 'erro'));
+});
+$$('#filtros-reinf select, #filtros-reinf input').forEach((el) => el.addEventListener('change', () => carregarRetencoes().catch((e) => avisar(e.message, 'erro'))));
+$('#btn-reinf-csv').addEventListener('click', () => { location.href = `/api/exportar/retencoes?${paramsReinf()}`; });
+$('#lista-reinf').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-reinf-notas]');
+  if (!b) return;
+  // Abre a tela Notas já filtrada: tomadas com retenção daquele fornecedor no mês
+  const f = $('#filtros');
+  f.reset();
+  f.busca.value = b.dataset.reinfNotas;
+  f.querySelector('input[name=papel][value=recebida]').checked = true;
+  f.querySelector('input[name=retencao][value=qualquer]').checked = true;
+  const emp = empresas.find((e) => e.cnpj === b.dataset.cnpj);
+  if (emp) f.empresa.value = String(emp.id);
+  if (b.dataset.mes) {
+    f.de.value = `${b.dataset.mes}-01`;
+    const [a, m] = b.dataset.mes.split('-').map(Number);
+    f.ate.value = new Date(Date.UTC(a, m, 0)).toISOString().slice(0, 10);
+  }
+  pagina = 0;
+  irPara('notas');
+});
+
 // ---------------- Notas ----------------
 const POR_PAGINA = 100;
 let pagina = 0;
@@ -400,6 +462,14 @@ async function carregarNotas() {
   $('#totais').innerHTML =
     chip('Notas', numero(totais.quantidade)) + chip('Valor dos serviços', moeda(totais.valor_servico)) +
     chip('ISS', moeda(totais.valor_iss)) + chip('Retenções', moeda(totais.valor_retencoes)) + chip('Valor líquido', moeda(totais.valor_liquido));
+  // Com um filtro de retenção ativo, mostra a soma de cada tributo retido
+  const comRetencao = p.get('retencao') && p.get('retencao') !== 'nenhuma';
+  $('#totais-ret').classList.toggle('oculto', !comRetencao);
+  if (comRetencao) {
+    $('#totais-ret').innerHTML =
+      chip('ISS retido', moeda(totais.ret_iss)) + chip('IRRF', moeda(totais.ret_irrf)) + chip('CSLL', moeda(totais.ret_csll)) +
+      chip('PIS', moeda(totais.ret_pis)) + chip('COFINS', moeda(totais.ret_cofins)) + chip('INSS', moeda(totais.ret_inss));
+  }
 
   $('#lista-notas').innerHTML = itens.length
     ? itens.map((d) => `<tr class="${d.situacao !== 'normal' ? 'cancelada-linha' : ''}">
@@ -854,6 +924,7 @@ async function atualizar() {
     if (abaAtual === 'notas') await carregarNotas();
     if (abaAtual === 'conferencia') await carregarConferencia();
     if (abaAtual === 'execucoes') await carregarAuditoria();
+    if (abaAtual === 'retencoes') await carregarRetencoes();
   } catch (e) {
     avisar(e.message, 'erro');
   }

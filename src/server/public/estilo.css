@@ -496,3 +496,14 @@ tr.clicavel { cursor: pointer; }
 .vinculo .recomendacao { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 12px; border-radius: 10px; background: var(--alerta-suave); font-size: 13px; }
 .vinculo .ultima-msg { color: var(--erro); }
 .texto-erro { color: var(--erro); }
+
+/* Retenções */
+.linha-filtro { flex: 1 1 100%; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rotulo-filtro { font-size: 12px; font-weight: 600; color: var(--texto-2); text-transform: uppercase; letter-spacing: .04em; }
+.segmentado.quebra { flex-wrap: wrap; }
+.totais-ret { margin-top: -6px; }
+.totais-ret .chip small { color: var(--texto-2); }
+.aviso-reinf { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; margin-bottom: 14px; font-size: 13px; color: var(--texto-2); }
+.aviso-reinf svg { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none; stroke-width: 2; margin-top: 1px; }
+.evento-reinf { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; background: var(--superficie-2); margin: 1px 2px 1px 0; white-space: nowrap; }
+@media (max-width: 860px) { .segmentado.quebra label { flex: 0 1 auto; } }

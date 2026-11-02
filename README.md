@@ -213,6 +213,20 @@ npm run cli -- auditoria verificar     # confere a cadeia de hash
 npm run cli -- auditoria exportar -o auditoria.json
 ```
 
+### Retenções e EFD-Reinf
+
+- **Filtro em 1 clique** (tela **Notas** → linha *Retenções*): com retenção, ISS retido, federais, IRRF,
+  PIS/COFINS/CSLL, INSS ou sem retenção. Com o filtro ativo, aparece a soma de cada tributo retido.
+  PIS/COFINS só contam quando a nota marca que foram **retidos**.
+- **Tela Retenções**: notas **tomadas** (canceladas ficam de fora) somadas por empresa × mês × fornecedor, com o
+  evento correspondente: **R-4020** (fornecedor PJ: IRRF, CSLL, PIS, COFINS), **R-4010** (fornecedor PF) e
+  **R-2010** (INSS retido). O botão de lupa abre as notas daquele fornecedor no mês.
+- **Planilha Reinf** (CSV para Excel): uma linha por fornecedor/mês, totais e colunas para preencher a
+  *natureza do rendimento* e a *data do pagamento*. API: `GET /api/retencoes?empresa=&de=AAAA-MM&ate=AAAA-MM`
+  e `GET /api/exportar/retencoes`.
+- ⚠️ É base de **conferência**. Na Reinf, a série R-4000 é declarada pela **data do pagamento/crédito**, não pela
+  competência da nota. Ajuste o mês pelo financeiro antes de transmitir. O sistema não transmite nada à Receita.
+
 ### Windows: busca automática diária
 
 1. Rode o `iniciar.bat` uma vez e cadastre as empresas.
