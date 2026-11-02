@@ -101,6 +101,7 @@
           </div>
           <div class="acoes">
             <button id="btn-buscar-todas" class="botao secundario"><svg><use href="#i-refresh"/></svg>Buscar todas</button>
+            <button id="btn-lote" class="botao secundario"><svg><use href="#i-upload"/></svg>Importar em lote</button>
             <button id="btn-nova-empresa" class="botao"><svg><use href="#i-plus"/></svg>Nova empresa</button>
           </div>
         </header>
@@ -217,6 +218,49 @@
     </form>
   </dialog>
 
+  <!-- Diálogo: importação de certificados em lote -->
+  <dialog id="dlg-lote" class="modal largo">
+    <div class="lote">
+      <div class="modal-topo">
+        <h3>Importar empresas em lote</h3>
+        <button type="button" class="botao-fantasma icone-so" data-fechar title="Fechar"><svg><use href="#i-x"/></svg></button>
+      </div>
+      <p class="dica"><svg><use href="#i-shield"/></svg>Selecione vários certificados A1. Cada um é validado antes de gravar; empresas já cadastradas têm o certificado renovado, mantendo notas e histórico.</p>
+
+      <label class="soltar" id="area-lote">
+        <svg><use href="#i-upload"/></svg>
+        <span><b>Escolha os certificados</b> ou arraste aqui (vários de uma vez)<br><small>.pfx ou .p12 · ou </small><button type="button" class="link" id="btn-lote-pasta">escolha uma pasta inteira</button></span>
+        <input type="file" id="lote-arquivos" accept=".pfx,.p12" multiple>
+      </label>
+      <input type="file" id="lote-pasta" webkitdirectory multiple class="oculto">
+
+      <div class="lote-opcoes">
+        <div class="lote-senha-todos">
+          <input type="password" id="lote-senha-todos" placeholder="Mesma senha para todos" autocomplete="off">
+          <button type="button" class="botao secundario" id="btn-lote-aplicar">Aplicar aos sem senha</button>
+        </div>
+        <button type="button" class="botao secundario" id="btn-lote-csv" title="CSV com colunas arquivo;senha ou CNPJ;senha"><svg><use href="#i-file"/></svg>Planilha de senhas</button>
+        <input type="file" id="lote-csv" accept=".csv,.txt" class="oculto">
+      </div>
+
+      <div class="tabela-wrap lote-tabela oculto" id="lote-tabela">
+        <table>
+          <thead><tr><th>Arquivo</th><th>Senha</th><th>Empresa</th><th>Validade</th><th>Situação</th><th></th></tr></thead>
+          <tbody id="lote-linhas"></tbody>
+        </table>
+      </div>
+
+      <div class="lote-rodape">
+        <span id="lote-resumo" class="sub"></span>
+        <menu>
+          <button type="button" class="botao secundario" data-fechar>Fechar</button>
+          <button type="button" class="botao secundario" id="btn-lote-validar" disabled>Validar</button>
+          <button type="button" class="botao" id="btn-lote-cadastrar" disabled>Cadastrar</button>
+        </menu>
+      </div>
+    </div>
+  </dialog>
+
   <!-- Diálogo: conciliação -->
   <dialog id="dlg-conciliar" class="modal">
     <form id="form-conciliar" method="dialog">
@@ -246,7 +290,7 @@
   </dialog>
 
   <input type="file" id="arquivo-importar" accept=".xml" multiple class="oculto">
-  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <div id="toasts" class="toasts" aria-live="polite" popover="manual"></div>
 
   <script type="module" src="app.js"></script>
 </body>

@@ -4,7 +4,8 @@ import path from 'node:path';
 import { Command } from 'commander';
 import { obterBanco } from '../db/index.js';
 import { Repositorio } from '../db/repositorio.js';
-import { cadastrarEmpresa } from '../crypto/credenciais.js';
+import { cadastrarEmpresa, analisarCertificado } from '../crypto/credenciais.js';
+import { lerPlanilhaSenhas, senhaPara } from '../util/senhas.js';
 import { lerCertificado } from '../crypto/certificado.js';
 import { sincronizarEmpresa, sincronizarTodas, importarXml } from '../adn/distribuicao.js';
 import { conciliarEmpresa, mesAnterior } from '../portal/conciliacao.js';
@@ -68,6 +69,49 @@ programa
       razaoSocial: o.razao,
     });
     console.log(`Empresa #${r.id} (${formatarCnpj(r.cnpj)}) salva. Certificado válido até ${r.certificado.validoAte.slice(0, 10)}.`);
+  });
+
+programa
+  .command('importar-certificados <caminhos...>')
+  .description('cadastra/renova várias empresas de uma vez a partir de .pfx (arquivos ou pastas)')
+  .option('-s, --senha <senha>', 'senha usada para os certificados sem senha na planilha')
+  .option('--senhas <csv>', 'planilha CSV "arquivo;senha" ou "CNPJ;senha"')
+  .option('--simular', 'só valida e mostra o resultado, sem gravar')
+  .option('--substituir-mais-novo', 'grava mesmo quando o certificado cadastrado vence depois do novo')
+  .action((caminhos, o) => {
+    const r = repo();
+    const senhas = o.senhas ? lerPlanilhaSenhas(fs.readFileSync(o.senhas, 'utf8')) : new Map();
+    const arquivos = caminhos.flatMap((c) =>
+      fs.statSync(c).isDirectory()
+        ? fs.readdirSync(c, { recursive: true }).map(String).filter((f) => /\.(pfx|p12)$/i.test(f)).map((f) => path.join(c, f))
+        : [c],
+    );
+    if (!arquivos.length) return console.log('Nenhum arquivo .pfx/.p12 encontrado.');
+    const cont = { nova: 0, renovacao: 0, ignorado: 0, erro: 0 };
+    const linhas = [];
+    for (const arq of arquivos) {
+      const senha = senhaPara(senhas, arq) ?? o.senha ?? '';
+      try {
+        const pfx = fs.readFileSync(arq);
+        const a = analisarCertificado(r, { pfx, senha });
+        let resultado;
+        if (a.situacao === 'mesmo' || (a.situacao === 'mais_antigo' && !o.substituirMaisNovo)) {
+          resultado = a.situacao === 'mesmo' ? 'já cadastrado' : 'ignorado (o cadastrado vence depois)';
+          cont.ignorado++;
+        } else {
+          if (!o.simular) cadastrarEmpresa(r, { pfx, senha });
+          resultado = (a.situacao === 'nova' ? 'nova' : 'renovação') + (o.simular ? ' (simulação)' : '');
+          cont[a.situacao === 'nova' ? 'nova' : 'renovacao']++;
+        }
+        linhas.push({ arquivo: path.basename(arq), cnpj: formatarCnpj(a.cnpj), empresa: a.nome.slice(0, 40), validade: a.validoAte.slice(0, 10), resultado });
+      } catch (e) {
+        cont.erro++;
+        linhas.push({ arquivo: path.basename(arq), cnpj: '', empresa: '', validade: '', resultado: `ERRO: ${e.message}` });
+      }
+    }
+    console.table(linhas);
+    console.log(`${cont.nova} nova(s), ${cont.renovacao} renovação(ões), ${cont.ignorado} ignorada(s), ${cont.erro} com erro.${o.simular ? ' Nada foi gravado (--simular).' : ''}`);
+    if (cont.erro) process.exitCode = 1;
   });
 
 programa

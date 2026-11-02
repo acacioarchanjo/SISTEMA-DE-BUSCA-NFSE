@@ -105,6 +105,31 @@ Depois de rodar o `iniciar.bat` pela primeira vez, dê **duplo clique em `criar-
 Para **fechar o sistema**, clique em **⏻ Encerrar** no canto do painel. Se mudar a pasta do sistema de lugar,
 rode o `criar-atalho.bat` de novo. O `iniciar.bat` continua funcionando com a janela visível, o que é útil para ver erros.
 
+### Cadastrar várias empresas de uma vez (em lote)
+
+Em **Empresas → Importar em lote**:
+1. selecione ou arraste vários `.pfx`/`.p12`, ou clique em **escolha uma pasta inteira**;
+2. informe as senhas: uma por linha, **"Mesma senha para todos"**, ou uma **planilha de senhas** (CSV);
+3. clique em **Validar**: cada certificado é aberto e aparece como *Nova empresa*, *Renovação*, *Já cadastrado*,
+   *Cadastrado vence depois* ou com o erro (senha incorreta, vencido…);
+4. clique em **Cadastrar**. Só os válidos são gravados. Na **renovação**, a empresa existente recebe o certificado novo
+   e mantém notas, cursor NSU e razão social.
+
+Planilha de senhas (Excel → "Salvar como CSV"), com o nome do arquivo (com ou sem `.pfx`) **ou** o CNPJ:
+
+```
+arquivo;senha
+Padaria Bom Pao;pao123
+11.222.333/0001-81;outraSenha
+```
+
+Pela linha de comando:
+
+```bash
+npm run cli -- importar-certificados C:\Certificados --senhas senhas.csv --simular
+```
+(sem `--simular` grava; `--senha X` vale para os que não estão na planilha)
+
 ### Windows: busca automática diária
 
 1. Rode o `iniciar.bat` uma vez e cadastre as empresas.
