@@ -44,7 +44,7 @@ set PORTA=3000
 if exist ".env" for /f "tokens=2 delims==" %%p in ('findstr /b /c:"NFSE_SERVER_PORT=" .env') do set PORTA=%%p
 node -e "const s=require('net').connect(%PORTA%,'127.0.0.1');s.on('connect',()=>process.exit(1));s.on('error',()=>process.exit(0));setTimeout(()=>process.exit(0),800)"
 if errorlevel 1 (
-  echo [ERRO] O painel esta aberto. Feche a janela do iniciar.bat e rode a atualizacao de novo.
+  echo [ERRO] O sistema esta aberto. Clique em "Encerrar" no painel ^(ou feche a janela do iniciar.bat^) e rode de novo.
   goto falha
 )
 

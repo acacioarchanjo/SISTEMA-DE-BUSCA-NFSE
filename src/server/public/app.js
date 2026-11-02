@@ -302,6 +302,21 @@ async function carregarExecucoes() {
     : '<tr><td colspan="9" class="vazio">Nenhuma execução ainda.</td></tr>';
 }
 
+// ---------------- Encerrar ----------------
+$('#btn-encerrar').addEventListener('click', async () => {
+  const rodando = haExecutando ? '\n\nATENÇÃO: há uma busca em andamento; ela será interrompida e continua de onde parou na próxima vez.' : '';
+  if (!confirm('Encerrar o Buscador NFS-e?' + rodando)) return;
+  try {
+    await api('/api/encerrar', { metodo: 'POST' });
+  } catch (e) {
+    return avisar(e.message, 'erro');
+  }
+  encerrado = true;
+  document.querySelectorAll('main, .resumo, .topo nav').forEach((el) => el.classList.add('oculto'));
+  $('#tela-encerrado').classList.remove('oculto');
+});
+let encerrado = false;
+
 // ---------------- Ciclo ----------------
 async function atualizar() {
   try {
@@ -313,5 +328,5 @@ async function atualizar() {
     avisar(e.message, 'erro');
   }
 }
-setInterval(() => { if (haExecutando) atualizar(); }, 3000);
+setInterval(() => { if (haExecutando && !encerrado) atualizar(); }, 3000);
 atualizar();

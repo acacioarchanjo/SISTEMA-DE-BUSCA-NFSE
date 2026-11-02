@@ -14,18 +14,31 @@ try {
 }
 
 const repo = new Repositorio(obterBanco());
-const servidor = criarServidor(repo);
-const agendador = iniciarAgendador(repo);
+let agendador = { parar() {} };
+const encerrar = () => {
+  console.log(`[${new Date().toLocaleString('pt-BR')}] Sistema encerrado.`);
+  agendador.parar();
+  servidor.close(() => process.exit(0));
+  servidor.closeAllConnections?.();
+  setTimeout(() => process.exit(0), 2000).unref();
+};
+const servidor = criarServidor(repo, { aoEncerrar: encerrar });
+agendador = iniciarAgendador(repo);
+
+servidor.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`\n[ERRO] A porta ${config.servidor.porta} já está em uso: o sistema provavelmente já está aberto.`);
+    console.error(`       Acesse http://${config.servidor.host}:${config.servidor.porta} ou mude NFSE_SERVER_PORT no .env.\n`);
+  } else {
+    console.error('[ERRO]', e.message);
+  }
+  process.exit(1);
+});
 
 servidor.listen(config.servidor.porta, config.servidor.host, () => {
-  console.log(`\n🔎 Buscador NFS-e rodando em http://${config.servidor.host}:${config.servidor.porta}`);
+  console.log(`\n[${new Date().toLocaleString('pt-BR')}] 🔎 Buscador NFS-e rodando em http://${config.servidor.host}:${config.servidor.porta}`);
   console.log(`   Ambiente: ${config.ambiente} | ADN: ${config.adn.host} | Banco: ${config.dbPath}\n`);
 });
 
-const encerrar = () => {
-  agendador.parar();
-  servidor.close(() => process.exit(0));
-  setTimeout(() => process.exit(0), 2000).unref();
-};
 process.on('SIGINT', encerrar);
 process.on('SIGTERM', encerrar);

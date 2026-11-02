@@ -100,3 +100,26 @@ test('servidor: bloqueia CSRF, Host estranho e path traversal', async () => {
     s.fechar();
   }
 });
+
+test('servidor: encerrar pelo painel chama o callback (e exige o cabeçalho anti-CSRF)', async () => {
+  let encerrou = 0;
+  const s = await subir({ aoEncerrar: () => encerrou++ });
+  try {
+    assert.equal((await fetch(s.base + '/api/encerrar', { method: 'POST' })).status, 403);
+    const r = await s.req('/api/encerrar', { metodo: 'POST' });
+    assert.equal(r.status, 200);
+    await new Promise((res) => setTimeout(res, 300));
+    assert.equal(encerrou, 1);
+  } finally {
+    s.fechar();
+  }
+});
+
+test('servidor: sem callback de encerramento a rota responde 501', async () => {
+  const s = await subir();
+  try {
+    assert.equal((await s.req('/api/encerrar', { metodo: 'POST' })).status, 501);
+  } finally {
+    s.fechar();
+  }
+});

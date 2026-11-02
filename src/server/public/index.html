@@ -14,6 +14,7 @@
       <button data-aba="empresas" class="ativa">Empresas</button>
       <button data-aba="notas">Notas</button>
       <button data-aba="execucoes">Execuções</button>
+      <button id="btn-encerrar" class="encerrar" title="Fecha o sistema (o servidor em segundo plano)">⏻ Encerrar</button>
     </nav>
   </header>
 
@@ -134,6 +135,13 @@
   </dialog>
 
   <input type="file" id="arquivo-importar" accept=".xml" multiple class="oculto">
+
+  <div id="tela-encerrado" class="encerrado oculto">
+    <div>
+      <h2>Sistema encerrado</h2>
+      <p>Pode fechar esta aba. Para abrir de novo, use o atalho “Buscador NFS-e” na Área de Trabalho.</p>
+    </div>
+  </div>
 
   <footer>Uso educacional · dados armazenados localmente · <a href="https://www.nfse.gov.br" target="_blank" rel="noopener">nfse.gov.br</a></footer>
   <script type="module" src="app.js"></script>

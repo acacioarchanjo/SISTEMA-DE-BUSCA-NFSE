@@ -80,3 +80,6 @@ dl.detalhe dd { margin: 0; word-break: break-word; }
 footer { text-align: center; color: var(--suave); font-size: 12px; padding: 20px; }
 a.mini { padding: 3px 8px; font-size: 12px; border: 1px solid var(--borda); border-radius: 6px; text-decoration: none; }
 td.nome { white-space: normal; min-width: 140px; max-width: 240px; }
+button.encerrar { margin-left: 8px; color: var(--erro); }
+.encerrado { display: flex; align-items: center; justify-content: center; min-height: 50vh; text-align: center; padding: 20px; }
+.encerrado p { color: var(--suave); }
