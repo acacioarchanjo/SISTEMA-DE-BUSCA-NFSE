@@ -54,9 +54,178 @@ async function api(url, { metodo = 'GET', corpo } = {}) {
     body: corpo ? JSON.stringify(corpo) : undefined,
   });
   const dados = await r.json().catch(() => ({}));
+  if (r.status === 401 && !['/api/login', '/api/sessao'].includes(url.split('?')[0])) {
+    // sessão expirou ou não existe: volta para a tela de login
+    if (typeof verificarSessao === 'function') verificarSessao().catch(() => {});
+  }
   if (!r.ok) throw new Error(dados.erro || `Erro HTTP ${r.status}`);
   return dados;
 }
+
+// ---------------- Sessão, login e usuários ----------------
+let sessao = null; // { usuario, modo, local, podeCriarAdmin, redeLiberada, perfis }
+let sistemaIniciado = false;
+
+function mostrarAcesso(qual) {
+  const tela = $('#tela-acesso');
+  tela.classList.toggle('oculto', !qual);
+  for (const [id, k] of [['#form-login', 'login'], ['#form-primeiro', 'primeiro'], ['#form-trocar', 'trocar'], ['#acesso-rede', 'rede']]) $(id).classList.toggle('oculto', qual !== k);
+  $$('#tela-acesso [data-erro]').forEach((e) => (e.textContent = ''));
+  const foco = { login: '#form-login [name=login]', primeiro: '#form-primeiro [name=nome]', trocar: '#form-trocar [name=atual]' }[qual];
+  if (foco) setTimeout(() => $(foco)?.focus(), 30);
+}
+
+function aplicarUsuario() {
+  const u = sessao?.usuario;
+  $('#usuario-logado').classList.toggle('oculto', !u);
+  $('#btn-sair').classList.toggle('oculto', !u);
+  $('#btn-minha-senha').classList.toggle('oculto', !u);
+  // Usuários: admin logado, ou o próprio computador ainda sem usuários (para criar o primeiro)
+  $('#btn-usuarios').classList.toggle('oculto', !(u?.perfil === 'admin' || sessao?.podeCriarAdmin));
+  if (u) {
+    $('#usuario-iniciais').textContent = iniciais(u.nome);
+    $('#usuario-nome').textContent = u.nome;
+    $('#usuario-perfil').textContent = sessao.perfis?.[u.perfil] ?? u.perfil;
+  }
+  // operador não encerra o sistema nem configura o Drive (em uso compartilhado)
+  const admin = !u || u.perfil === 'admin';
+  $('#btn-encerrar').classList.toggle('oculto', !admin);
+  $('#btn-drive').classList.toggle('oculto', !admin);
+}
+
+async function verificarSessao() {
+  sessao = await api('/api/sessao');
+  if (sessao.modo === 'login' && !sessao.usuario) return mostrarAcesso('login');
+  if (sessao.modo === 'computador-unico' && !sessao.local) return mostrarAcesso('rede');
+  if (sessao.usuario?.trocar_senha) {
+    $('#form-trocar [data-titulo]').textContent = 'Troque a senha provisória';
+    $('#form-trocar [data-cancelar-troca]').classList.add('oculto');
+    return mostrarAcesso('trocar');
+  }
+  mostrarAcesso(null);
+  aplicarUsuario();
+  if (!sistemaIniciado) { sistemaIniciado = true; atualizar(); }
+}
+
+$('#form-login').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = ev.target;
+  const b = f.querySelector('button');
+  b.disabled = true;
+  try {
+    await api('/api/login', { metodo: 'POST', corpo: { login: f.login.value, senha: f.senha.value } });
+    f.reset();
+    await verificarSessao();
+    if (sistemaIniciado) atualizar();
+  } catch (e) {
+    f.querySelector('[data-erro]').textContent = e.message;
+    f.senha.value = '';
+    f.senha.focus();
+  } finally {
+    b.disabled = false;
+  }
+});
+
+$('#form-primeiro').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = ev.target;
+  const erro = f.querySelector('[data-erro]');
+  if (f.senha.value !== f.senha2.value) { erro.textContent = 'As senhas não conferem.'; return; }
+  try {
+    await api('/api/primeiro-acesso', { metodo: 'POST', corpo: { nome: f.nome.value, login: f.login.value.trim().toLowerCase(), senha: f.senha.value } });
+    f.reset();
+    await verificarSessao();
+    avisar('Administrador criado. Agora cadastre os colegas em “Usuários”.');
+    abrirUsuarios().catch(() => {});
+  } catch (e) { erro.textContent = e.message; }
+});
+$('[data-cancelar-primeiro]').addEventListener('click', () => mostrarAcesso(null));
+
+$('#form-trocar').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = ev.target;
+  const erro = f.querySelector('[data-erro]');
+  if (f.nova.value !== f.nova2.value) { erro.textContent = 'As senhas não conferem.'; return; }
+  try {
+    await api('/api/senha', { metodo: 'POST', corpo: { atual: f.atual.value, nova: f.nova.value } });
+    f.reset();
+    avisar('Senha alterada.');
+    await verificarSessao();
+  } catch (e) { erro.textContent = e.message; }
+});
+$('[data-cancelar-troca]').addEventListener('click', () => mostrarAcesso(null));
+
+$('#btn-minha-senha').addEventListener('click', () => {
+  $('#form-trocar [data-titulo]').textContent = 'Trocar minha senha';
+  $('#form-trocar [data-cancelar-troca]').classList.remove('oculto');
+  mostrarAcesso('trocar');
+});
+
+$('#btn-sair').addEventListener('click', async () => {
+  await api('/api/logout', { metodo: 'POST' }).catch(() => {});
+  sessao = null;
+  location.reload();
+});
+
+// ----- janela Usuários -----
+async function abrirUsuarios() {
+  if (!sessao?.usuario && sessao?.podeCriarAdmin) return mostrarAcesso('primeiro');
+  const { usuarios, enderecos, redeLiberada } = await api('/api/usuarios');
+  const eu = sessao.usuario.id;
+  $('#usuarios-rede').innerHTML = redeLiberada
+    ? `<b>Acesso pela rede ligado.</b> Nos outros computadores do escritório, abra no navegador: ${enderecos.length ? enderecos.map((e) => `<code>${esc(e.url)}</code>`).join(' ou ') : '<i>endereço não encontrado (verifique a rede)</i>'}`
+    : '<b>Acesso pela rede desligado:</b> só este computador abre o sistema. Para liberar aos colegas, rode o <code>liberar-acesso-rede.bat</code> (uma vez) e reinicie o sistema.';
+  $('#lista-usuarios').innerHTML = usuarios.map((u) => `<tr>
+      <td class="nome"><b>${esc(u.nome)}</b>${u.id === eu ? '<span class="sub">você</span>' : ''}</td>
+      <td>${esc(u.login)}</td>
+      <td><select data-perfil="${u.id}">${Object.entries(sessao.perfis).map(([k, t]) => `<option value="${k}" ${k === u.perfil ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></td>
+      <td>${u.ultimo_acesso ? new Date(u.ultimo_acesso).toLocaleString('pt-BR') : '—'}</td>
+      <td>${u.ativo ? (u.trocar_senha ? '<span class="pilula alerta">senha provisória</span>' : '<span class="pilula ok">ativo</span>') : '<span class="pilula erro">desativado</span>'}</td>
+      <td><div class="acoes-usuario">
+        <button class="botao secundario pequeno" data-redefinir="${u.id}" data-nome="${esc(u.nome)}">Nova senha</button>
+        ${u.id !== eu ? `<button class="botao secundario pequeno" data-ativar="${u.id}" data-ativo="${u.ativo ? 1 : 0}">${u.ativo ? 'Desativar' : 'Reativar'}</button>` : ''}
+      </div></td></tr>`).join('');
+  if (!$('#dlg-usuarios').open) $('#dlg-usuarios').showModal();
+}
+$('#btn-usuarios').addEventListener('click', () => abrirUsuarios().catch((e) => avisar(e.message, 'erro')));
+$('#form-novo-usuario').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = ev.target;
+  $('#erro-usuario').textContent = '';
+  try {
+    const u = await api('/api/usuarios', { metodo: 'POST', corpo: { nome: f.nome.value, login: f.login.value.trim().toLowerCase(), senha: f.senha.value, perfil: f.perfil.value } });
+    f.reset();
+    avisar(`Usuário ${u.login} criado. Passe a senha provisória para a pessoa: ela troca no primeiro acesso.`);
+    abrirUsuarios();
+  } catch (e) { $('#erro-usuario').textContent = e.message; }
+});
+$('#lista-usuarios').addEventListener('change', async (ev) => {
+  const s = ev.target.closest('[data-perfil]');
+  if (!s) return;
+  try {
+    await api(`/api/usuarios/${s.dataset.perfil}`, { metodo: 'PATCH', corpo: { perfil: s.value } });
+    avisar('Perfil alterado.');
+  } catch (e) { avisar(e.message, 'erro'); }
+  abrirUsuarios();
+});
+$('#lista-usuarios').addEventListener('click', async (ev) => {
+  const r = ev.target.closest('[data-redefinir]');
+  const a = ev.target.closest('[data-ativar]');
+  try {
+    if (r) {
+      const senha = prompt(`Senha provisória para ${r.dataset.nome} (mín. 8, letras e números). A pessoa troca no próximo acesso:`);
+      if (!senha) return;
+      await api(`/api/usuarios/${r.dataset.redefinir}/senha`, { metodo: 'POST', corpo: { senha } });
+      avisar('Senha provisória definida. As sessões abertas dessa pessoa foram encerradas.');
+    } else if (a) {
+      const ativar = a.dataset.ativo !== '1';
+      if (!ativar && !confirm('Desativar este usuário? Ele perde o acesso na hora.')) return;
+      await api(`/api/usuarios/${a.dataset.ativar}`, { metodo: 'PATCH', corpo: { ativo: ativar } });
+      avisar(ativar ? 'Usuário reativado.' : 'Usuário desativado.');
+    } else return;
+    abrirUsuarios();
+  } catch (e) { avisar(e.message, 'erro'); }
+});
 
 // ---------------- Avisos (toasts) ----------------
 function avisar(msg, tipo = 'ok') {
@@ -923,7 +1092,11 @@ const TIPO_GUIA = { ISS_PROPRIO: 'ISS próprio', ISS_RETIDO: 'ISS retido (tomado
 const ROTULO_ETAPA = Object.fromEntries(ETAPAS_APU);
 const PILULA_ETAPA = { ABERTA: 'alerta', APROVADA: 'executando', ENCERRADA: 'executando', GUIA_EMITIDA: 'executando', PAGA: 'ok' };
 let apuAlvo = null; // { empresa, ibge, competencia }
-const nomeOperador = () => { try { return localStorage.getItem('operador') ?? ''; } catch { return ''; } };
+const nomeOperador = () => { if (sessao?.usuario) return sessao.usuario.nome; try { return localStorage.getItem('operador') ?? ''; } catch { return ''; } };
+/** Campo "Seu nome": com login, quem age é o usuário da sessão (o servidor ignora o que vier no campo). */
+const campoPor = () => (sessao?.usuario
+  ? `<input type="hidden" name="por" value="${esc(sessao.usuario.nome)}"><p class="sub-texto">Registrado como <b>${esc(sessao.usuario.nome)}</b>.</p>`
+  : `<label class="campo"><span>Seu nome</span><input name="por" required value="${esc(nomeOperador())}"></label>`);
 const lembrarOperador = (n) => { try { localStorage.setItem('operador', n); } catch { /* sem armazenamento */ } };
 const mesAnteriorIso = () => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7); };
 const brData = (iso) => (iso ? iso.slice(0, 10).split('-').reverse().join('/') : '—');
@@ -1025,7 +1198,7 @@ function renderApuracao(e) {
           <form class="acao-apu" data-apu-form="reabrir">
             <p class="sub-texto">Volta para a apuração. Tudo o que foi registrado fica na auditoria${['ENCERRADA', 'GUIA_EMITIDA', 'PAGA'].includes(e.status) ? '; se já encerrou no portal, a correção lá é uma retificação' : ''}.</p>
             <label class="campo"><span>Motivo</span><input name="motivo" required minlength="10"></label>
-            <label class="campo"><span>Seu nome</span><input name="por" required value="${esc(nomeOperador())}"></label>
+            ${campoPor()}
             <button class="botao secundario perigo">Reabrir</button>
           </form></details>` : ''}
       </div>
@@ -1039,7 +1212,7 @@ function acaoApuracao(e, a) {
       <form class="acao-apu" data-apu-form="aprovar">
         <p class="sub-texto">Ao aprovar, os valores ficam congelados (com impressão digital SHA-256). Se uma nota chegar depois, o sistema avisa.</p>
         ${e.atual.bloqueantes ? `<label class="campo"><span>Justificativa (há ${e.atual.bloqueantes} pendência(s) bloqueante(s))</span><textarea name="justificativa" rows="2" minlength="15" required></textarea></label>` : ''}
-        <label class="campo"><span>Seu nome</span><input name="por" required value="${por}"></label>
+        ${campoPor()}
         <label class="check"><input type="checkbox" name="confirmo" required> Conferi as notas e os valores de ${moeda(a.totalARecolher)}</label>
         <button class="botao">Aprovar apuração</button>
       </form>`;
@@ -1053,7 +1226,7 @@ function acaoApuracao(e, a) {
           <label class="campo"><span>Data do encerramento</span><input type="date" name="data" required value="${new Date().toISOString().slice(0, 10)}"></label>
         </div>
         <label class="campo"><span>Observação</span><input name="observacao"></label>
-        <label class="campo"><span>Seu nome</span><input name="por" required value="${por}"></label>
+        ${campoPor()}
         <button class="botao" ${e.desatualizada ? 'disabled' : ''}>Registrar encerramento</button>
       </form>`;
   }
@@ -1069,7 +1242,7 @@ function acaoApuracao(e, a) {
           <label class="campo"><span>PDF da guia (opcional)</span><input type="file" name="pdf" accept="application/pdf"></label>
         </div>
         <label class="campo oculto" data-just><span>Justificativa da diferença de valor</span><input name="justificativaDiferenca"></label>
-        <label class="campo"><span>Seu nome</span><input name="por" required value="${por}"></label>
+        ${campoPor()}
         <button class="botao" ${e.desatualizada ? 'disabled' : ''}>Registrar guia</button>
       </form>`).join('<hr>');
   }
@@ -1103,7 +1276,7 @@ function guiasRegistradas(e) {
           <label class="campo"><span>Autenticação bancária</span><input name="autenticacao"></label>
           <label class="campo"><span>Comprovante (PDF)</span><input type="file" name="pdf" accept="application/pdf"></label>
         </div>
-        <label class="campo"><span>Seu nome</span><input name="por" required value="${por}"></label>
+        ${campoPor()}
         <button class="botao">Registrar pagamento</button>
       </form>` : ''}
     </div>`).join('')}</section>`;
@@ -1261,8 +1434,8 @@ async function atualizar() {
     avisar(e.message, 'erro');
   }
 }
-setInterval(() => { if (haExecutando && !encerrado) atualizar(); }, 3000);
-atualizar();
+setInterval(() => { if (haExecutando && !encerrado && sistemaIniciado && $('#tela-acesso').classList.contains('oculto')) atualizar(); }, 3000);
+verificarSessao().catch((e) => avisar(e.message, 'erro'));
 
 // ---------------- Prefeituras (conectores municipais) ----------------
 let empresaPrefeituras = null;

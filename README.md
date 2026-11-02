@@ -283,6 +283,30 @@ A tela **Apuração ISS** cobre o fechamento do mês, da apuração ao pagamento
   - O sistema **não encerra, não emite e não paga**: ele calcula, confere e registra.
   - O vencimento vem do código de barras (boleto) ou é digitado: não há dia fixo no código.
 
+### Vários usuários e acesso pela rede do escritório
+
+- **Primeiro acesso** (no computador onde o sistema está instalado): botão **Usuários** → crie o administrador.
+  A partir daí, **todos entram com login e senha**, inclusive nesse computador.
+- **Usuários** (só administrador): cadastre os colegas com uma **senha provisória**, que a pessoa troca no primeiro
+  acesso. Na mesma tela dá para trocar o perfil, definir nova senha e desativar.
+- **Perfis**:
+  - **Operador**: busca, confere, exporta e **aprova/encerra competências**.
+  - **Administrador**: tudo isso e também gerencia usuários, exclui empresas, configura o Google Drive e encerra o sistema.
+  - Sempre fica pelo menos um administrador ativo.
+- **Ligar a rede**: rode o `liberar-acesso-rede.bat` → **1**. Ele pede permissão de administrador do Windows, grava
+  `NFSE_SERVER_HOST=0.0.0.0` no `.env` e cria a regra do Firewall (só redes privadas e a sub-rede local).
+  Depois clique em **Encerrar** e abra o sistema de novo. Os endereços para os colegas aparecem na janela **Usuários**,
+  por exemplo `http://192.168.0.10:3000`. Para desligar, use a opção **2**.
+- **Segurança**:
+  - senhas com scrypt + sal (nunca em texto);
+  - sessão em cookie `HttpOnly`/`SameSite=Strict`, que expira após 8 h parada ou 12 h no total;
+  - 5 senhas erradas bloqueiam o usuário por 15 min, e há limite de tentativas por computador;
+  - endereços **públicos da internet são sempre recusados**, e o Host é conferido (proteção contra DNS rebinding);
+  - o primeiro administrador só pode ser criado no próprio computador;
+  - a auditoria registra **quem** fez cada ação (aprovação, encerramento, guia, login, cadastro).
+- **Fora do escritório**: use o **Tailscale** (rede privada gratuita). Os endereços `100.x.x.x` já são aceitos.
+  **Não** abra a porta no roteador.
+
 ### Windows: busca automática diária
 
 1. Rode o `iniciar.bat` uma vez e cadastre as empresas.

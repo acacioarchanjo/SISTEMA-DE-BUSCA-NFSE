@@ -26,6 +26,11 @@ import { gerarPacoteDominio } from '../exportador/dominio.js';
 import { lerPreferencias, salvarPreferencias, sincronizarEspelho, ErroEspelho } from '../espelho/drive.js';
 import { estadoCompetencia, aprovar, reabrir, registrarEncerramento, registrarGuia, registrarPagamento, visaoGeral, ErroFluxo } from '../apuracao/fluxo.js';
 import { analisarBoleto } from '../apuracao/boleto.js';
+import {
+  ErroAuth, PERFIS as PERFIS_USUARIO, contarUsuarios, listarUsuarios, criarUsuario, atualizarUsuario, redefinirSenha, trocarSenha,
+  entrar, sair, sessaoDoToken, lerCookie, cookieSessao, cookieApagar, ipDe, ehLocal, ehPrivado, hostPermitido, enderecosDaRede,
+} from './auth.js';
+import { comContexto, usuarioAtual } from '../contexto.js';
 
 const PUBLICO = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 // Módulos usados tanto pelo servidor/CLI quanto pelo navegador (mesma regra nos dois lados).
@@ -125,7 +130,16 @@ export function criarServidor(repo, opcoes = {}) {
   const testarVinculoFn = opcoes.testarVinculo ?? testarVinculo;
   const conciliar = opcoes.conciliar ?? conciliarEmpresa;
   const dataDir = opcoes.dataDir ?? config.dataDir;
-  const hostsPermitidos = new Set(['localhost', '127.0.0.1', '[::1]', config.servidor.host]);
+  // Rede liberada quando o servidor escuta fora do loopback (NFSE_SERVER_HOST=0.0.0.0 ou o IP da máquina)
+  const ipDaReq = opcoes.ipDe ?? ipDe; // testes simulam outro computador da rede
+  const redeLiberada = opcoes.redeLiberada ?? !['127.0.0.1', 'localhost', '::1'].includes(config.servidor.host);
+  const hostsExtras = [config.servidor.host, ...String(process.env.NFSE_HOSTS_PERMITIDOS ?? '').split(',').map((x) => x.trim()).filter(Boolean)];
+  // Rotas abertas (tela de login) e rotas só de administrador
+  const ROTAS_PUBLICAS = new Set(['GET /api/sessao', 'POST /api/login', 'POST /api/logout', 'POST /api/primeiro-acesso']);
+  const SO_ADMIN = [
+    /^POST \/api\/encerrar$/, /^(GET|POST|PATCH) \/api\/usuarios/, /^DELETE \/api\/empresas\//, /^POST \/api\/espelho$/,
+    /^DELETE \/api\/municipios\//,
+  ];
 
   let espelhoRodando = false;
   const emSegundoPlano = (fn) => {
@@ -147,6 +161,87 @@ export function criarServidor(repo, opcoes = {}) {
 
   // [método, regex, handler(req, res, params, query)]
   const rotas = [
+    // ---------- sessão / usuários ----------
+    ['GET', /^\/api\/sessao$/, (req, res) => {
+      const ip = ipDaReq(req);
+      const total = contarUsuarios(repo.db);
+      const s = sessaoDoToken(repo.db, lerCookie(req));
+      json(res, 200, {
+        usuario: s?.usuario ?? null,
+        modo: total ? 'login' : 'computador-unico',
+        local: ehLocal(ip),
+        // primeiro acesso só no próprio computador do sistema (ninguém da rede "toma" o administrador)
+        podeCriarAdmin: !total && ehLocal(ip),
+        redeLiberada,
+        perfis: PERFIS_USUARIO,
+      });
+    }],
+
+    ['POST', /^\/api\/primeiro-acesso$/, async (req, res) => {
+      if (contarUsuarios(repo.db)) throw new ErroHttp(409, 'O administrador já foi criado. Entre com login e senha.');
+      if (!ehLocal(ipDaReq(req))) throw new ErroHttp(403, 'O primeiro administrador só pode ser criado no computador onde o sistema está instalado.');
+      const b = await lerCorpo(req);
+      const u = criarUsuario(repo.db, { nome: b.nome, login: b.login, senha: b.senha, perfil: 'admin', trocarSenha: false });
+      const { token } = entrar(repo.db, { login: u.login, senha: b.senha }, { ip: ipDaReq(req), navegador: req.headers['user-agent'] });
+      comContexto({ usuario: u }, () => registrarAuditoria(repo.db, { tipo: 'usuario.primeiro_admin', payload: { usuario_criado: u.login } }));
+      res.setHeader('Set-Cookie', cookieSessao(token));
+      json(res, 201, { usuario: u });
+    }],
+
+    ['POST', /^\/api\/login$/, async (req, res) => {
+      const b = await lerCorpo(req);
+      try {
+        const { token, usuario } = entrar(repo.db, { login: b.login, senha: b.senha }, { ip: ipDaReq(req), navegador: req.headers['user-agent'] });
+        comContexto({ usuario }, () => registrarAuditoria(repo.db, { tipo: 'usuario.login', payload: { ip: ipDaReq(req) } }));
+        res.setHeader('Set-Cookie', cookieSessao(token));
+        json(res, 200, { usuario });
+      } catch (e) {
+        if (e instanceof ErroAuth) {
+          registrarAuditoria(repo.db, { tipo: 'usuario.login_recusado', payload: { login: String(b.login ?? '').slice(0, 40), ip: ipDaReq(req), motivo: e.message } });
+          throw new ErroHttp(e.status, e.message);
+        }
+        throw e;
+      }
+    }],
+
+    ['POST', /^\/api\/logout$/, (req, res) => {
+      sair(repo.db, lerCookie(req));
+      res.setHeader('Set-Cookie', cookieApagar());
+      json(res, 200, { ok: true });
+    }],
+
+    ['POST', /^\/api\/senha$/, async (req, res) => {
+      const u = usuarioAtual();
+      if (!u) throw new ErroHttp(400, 'Sem usuário logado.');
+      const b = await lerCorpo(req);
+      trocarSenha(repo.db, u.id, { atual: b.atual, nova: b.nova }, sessaoDoToken(repo.db, lerCookie(req))?.tokenHash);
+      registrarAuditoria(repo.db, { tipo: 'usuario.senha_trocada', payload: {} });
+      json(res, 200, { ok: true });
+    }],
+
+    ['GET', /^\/api\/usuarios$/, (req, res) => json(res, 200, { usuarios: listarUsuarios(repo.db), enderecos: enderecosDaRede(config.servidor.porta), redeLiberada })],
+
+    ['POST', /^\/api\/usuarios$/, async (req, res) => {
+      const b = await lerCorpo(req);
+      const u = criarUsuario(repo.db, { nome: b.nome, login: b.login, senha: b.senha, perfil: b.perfil, trocarSenha: true });
+      registrarAuditoria(repo.db, { tipo: 'usuario.criado', payload: { usuario_criado: u.login, perfil: u.perfil } });
+      json(res, 201, u);
+    }],
+
+    ['PATCH', /^\/api\/usuarios\/(\d+)$/, async (req, res, [id]) => {
+      const b = await lerCorpo(req);
+      const u = atualizarUsuario(repo.db, Number(id), { nome: b.nome, perfil: b.perfil, ativo: b.ativo }, usuarioAtual()?.id);
+      registrarAuditoria(repo.db, { tipo: 'usuario.alterado', payload: { alvo: u.login, perfil: u.perfil, ativo: u.ativo } });
+      json(res, 200, u);
+    }],
+
+    ['POST', /^\/api\/usuarios\/(\d+)\/senha$/, async (req, res, [id]) => {
+      const b = await lerCorpo(req);
+      redefinirSenha(repo.db, Number(id), b.senha);
+      registrarAuditoria(repo.db, { tipo: 'usuario.senha_redefinida', payload: { alvo_id: Number(id) } });
+      json(res, 200, { ok: true });
+    }],
+
     ['GET', /^\/api\/resumo$/, (req, res) => json(res, 200, { ...repo.resumo(), ambiente: config.ambiente })],
 
     ['POST', /^\/api\/encerrar$/, (req, res) => {
@@ -418,6 +513,7 @@ export function criarServidor(repo, opcoes = {}) {
       const alvo = alvoCompetencia(b);
       empresaOu404(alvo.empresaId);
       const fn = { aprovar, reabrir, encerramento: registrarEncerramento, guia: registrarGuia, pagamento: registrarPagamento }[acao];
+      if (usuarioAtual()) b.por = usuarioAtual().nome; // com login, quem age é o usuário da sessão (não um nome digitado)
       try {
         json(res, 200, fn(repo.db, alvo, b, { dataDir }));
       } catch (e) {
@@ -522,9 +618,12 @@ export function criarServidor(repo, opcoes = {}) {
   ];
 
   async function tratar(req, res) {
-    // Proteção contra DNS rebinding: só aceita Host local.
+    // Só rede local/privada: um endereço público da internet nunca é atendido (mesmo se a porta for aberta no roteador).
+    const ip = ipDaReq(req);
+    if (!ehLocal(ip) && (!redeLiberada || !ehPrivado(ip))) throw new ErroHttp(403, 'Acesso permitido só pela rede do escritório.');
+    // Proteção contra DNS rebinding: só aceita Host conhecido (localhost, nome/IP desta máquina na rede).
     const host = String(req.headers.host ?? '').replace(/:\d+$/, '');
-    if (!hostsPermitidos.has(host)) throw new ErroHttp(403, 'Host não permitido.');
+    if (!hostPermitido(host, { extras: hostsExtras, redeLiberada })) throw new ErroHttp(403, 'Host não permitido.');
 
     const url = new URL(req.url, 'http://localhost');
     const metodo = req.method.toUpperCase();
@@ -533,10 +632,33 @@ export function criarServidor(repo, opcoes = {}) {
       // CSRF: requisições que alteram estado precisam do cabeçalho customizado
       // (um site externo não consegue enviá-lo sem preflight CORS, que não é liberado).
       if (metodo !== 'GET' && req.headers['x-buscador'] !== '1') throw new ErroHttp(403, 'Requisição bloqueada (CSRF).');
+      const chave = `${metodo} ${url.pathname}`;
+      let usuario = null;
+      if (!ROTAS_PUBLICAS.has(chave)) {
+        if (contarUsuarios(repo.db) === 0) {
+          // modo computador único: sem usuários, só o próprio computador acessa
+          if (!ehLocal(ip)) throw new ErroHttp(401, 'Ninguém foi cadastrado ainda: crie o administrador no computador onde o sistema está instalado.');
+        } else {
+          const s = sessaoDoToken(repo.db, lerCookie(req));
+          if (!s) throw new ErroHttp(401, 'Faça login para continuar.');
+          usuario = s.usuario;
+          if (usuario.trocar_senha && chave !== 'POST /api/senha') throw new ErroHttp(403, 'Troque a senha provisória para continuar.');
+          if (usuario.perfil !== 'admin' && SO_ADMIN.some((rx) => rx.test(chave))) throw new ErroHttp(403, 'Só um administrador pode fazer isso.');
+        }
+      }
       for (const [m, rx, handler] of rotas) {
         if (m !== metodo) continue;
         const casou = url.pathname.match(rx);
-        if (casou) return handler(req, res, casou.slice(1), url.searchParams);
+        if (casou) {
+          return comContexto({ usuario }, async () => {
+            try {
+              return await handler(req, res, casou.slice(1), url.searchParams);
+            } catch (e) {
+              if (e instanceof ErroAuth) throw new ErroHttp(e.status, e.message);
+              throw e;
+            }
+          });
+        }
       }
       throw new ErroHttp(404, 'Rota não encontrada.');
     }

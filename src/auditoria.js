@@ -2,6 +2,7 @@
 // Cada registro guarda o hash do anterior; alterar ou apagar qualquer linha quebra a cadeia.
 // O banco também impede UPDATE/DELETE na tabela (triggers em db/index.js).
 import crypto from 'node:crypto';
+import { usuarioAtual } from './contexto.js';
 
 export const HASH_INICIAL = 'sha256:' + '0'.repeat(64);
 export const VERSAO_SCHEMA = '1.0.0';
@@ -33,6 +34,9 @@ export function mascararDocumento(doc) {
  * @param {{tipo:string, payload:object, empresaCnpj?:string, execucaoId?:number, loteId?:string}} r
  */
 export function registrarAuditoria(db, { tipo, payload, empresaCnpj = null, execucaoId = null, loteId = null }) {
+  // quem fez: usuário logado no painel (ausente no agendador e na linha de comando)
+  const u = usuarioAtual();
+  if (u && payload && typeof payload === 'object' && !('usuario' in payload)) payload = { ...payload, usuario: { id: u.id, login: u.login, nome: u.nome } };
   const gravar = db.transaction(() => {
     const ultimo = db.prepare('SELECT hash_registro FROM auditoria ORDER BY id DESC LIMIT 1').get();
     const hash_anterior = ultimo?.hash_registro ?? HASH_INICIAL;
