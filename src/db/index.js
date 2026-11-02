@@ -176,6 +176,32 @@ CREATE TABLE IF NOT EXISTS competencias_iss (
   UNIQUE (empresa_id, ibge, competencia)
 );
 
+-- Usuários do painel (acesso pela rede do escritório). Senha com scrypt + sal; nunca em texto.
+CREATE TABLE IF NOT EXISTS usuarios (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  nome           TEXT NOT NULL,
+  login          TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  senha_hash     TEXT NOT NULL,
+  perfil         TEXT NOT NULL DEFAULT 'operador',   -- admin | operador
+  ativo          INTEGER NOT NULL DEFAULT 1,
+  trocar_senha   INTEGER NOT NULL DEFAULT 0,          -- senha provisória: obriga a trocar no 1º acesso
+  falhas         INTEGER NOT NULL DEFAULT 0,
+  bloqueado_ate  TEXT,
+  ultimo_acesso  TEXT,
+  criado_em      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Sessões: só o SHA-256 do token fica no banco (o token vai no cookie HttpOnly)
+CREATE TABLE IF NOT EXISTS sessoes (
+  token_hash   TEXT PRIMARY KEY,
+  usuario_id   INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  criado_em    TEXT NOT NULL,
+  expira_em    TEXT NOT NULL,
+  ultimo_uso   TEXT NOT NULL,
+  ip           TEXT,
+  navegador    TEXT
+);
+
 -- Preferências gravadas pelo painel (ex.: pasta do Google Drive)
 CREATE TABLE IF NOT EXISTS configuracoes (
   chave         TEXT PRIMARY KEY,

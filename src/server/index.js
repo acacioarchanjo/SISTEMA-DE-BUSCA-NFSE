@@ -4,6 +4,7 @@ import { carregarChave } from '../crypto/cofre.js';
 import { obterBanco } from '../db/index.js';
 import { Repositorio } from '../db/repositorio.js';
 import { criarServidor } from './app.js';
+import { enderecosDaRede } from './auth.js';
 import { iniciarAgendador } from '../agendador.js';
 
 try {
@@ -37,7 +38,12 @@ servidor.on('error', (e) => {
 
 servidor.listen(config.servidor.porta, config.servidor.host, () => {
   console.log(`\n[${new Date().toLocaleString('pt-BR')}] 🔎 Buscador NFS-e rodando em http://${config.servidor.host}:${config.servidor.porta}`);
-  console.log(`   Ambiente: ${config.ambiente} | ADN: ${config.adn.host} | Banco: ${config.dbPath}\n`);
+  console.log(`   Ambiente: ${config.ambiente} | ADN: ${config.adn.host} | Banco: ${config.dbPath}`);
+  if (!['127.0.0.1', 'localhost', '::1'].includes(config.servidor.host)) {
+    const ends = enderecosDaRede(config.servidor.porta);
+    console.log(`   Acesso pela rede LIGADO (login obrigatório). Nos outros computadores: ${ends.map((e) => e.url).join('  ou  ') || '(sem endereço de rede)'}`);
+  }
+  console.log('');
 });
 
 process.on('SIGINT', encerrar);
