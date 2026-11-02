@@ -24,6 +24,7 @@ export const OPCOES_PADRAO = {
   maxPaginas: 200,               // proteção contra paginação infinita
   assinarConsulta: false,        // assina a consulta (XMLDSig); detectado automaticamente se a prefeitura exigir
   algoritmoAssinatura: 'sha1',   // 'sha1' (padrão ABRASF) | 'sha256'
+  namespaceDados: undefined,     // namespace do XML de dados; undefined = o do padrão; '' = sem namespace
   timeoutMs: 60000,
 };
 
@@ -50,17 +51,20 @@ export function obterPerfil(id) {
   return p;
 }
 
+/** Opções em que o valor vazio tem significado: soapAction '' = cabeçalho vazio; namespaceDados '' = sem namespace. */
+const VAZIO_SIGNIFICA = new Set(['soapAction', 'namespaceDados']);
+
 /** Opções efetivas: padrão < perfil < município. */
 export function opcoesEfetivas(perfil, opcoesMunicipio = {}) {
   // '' só é aceito onde vazio tem significado (soapAction vazio = não enviar o cabeçalho)
-  const limpas = Object.fromEntries(Object.entries(opcoesMunicipio ?? {}).filter(([k, v]) => v !== null && v !== undefined && (v !== '' || k === 'soapAction')));
+  const limpas = Object.fromEntries(Object.entries(opcoesMunicipio ?? {}).filter(([k, v]) => v !== null && v !== undefined && (v !== '' || VAZIO_SIGNIFICA.has(k))));
   return { ...OPCOES_PADRAO, ...perfil.opcoes, ...limpas };
 }
 
 /** Tipos das opções configuráveis (para validar o que vem do painel/CLI). */
 export const TIPOS_OPCOES = {
   soapVersao: ['1.1', '1.2'], estilo: ['cabec-dados', 'direto'], embutir: ['escapado', 'cdata'], periodo: ['emissao', 'competencia'], algoritmoAssinatura: ['sha1', 'sha256'],
-  nsServico: 'texto', elementoOperacao: 'texto', soapAction: 'texto',
+  nsServico: 'texto', elementoOperacao: 'texto', soapAction: 'texto', namespaceDados: 'texto',
   janelaDias: 'numero', intervaloMs: 'numero', maxPaginas: 'numero', timeoutMs: 'numero', assinarConsulta: 'booleano',
 };
 
@@ -69,7 +73,7 @@ export function sanitizarOpcoes(opcoes = {}) {
   const r = {};
   for (const [k, v] of Object.entries(opcoes ?? {})) {
     const tipo = TIPOS_OPCOES[k];
-    if (!tipo || v === null || v === undefined || (v === '' && k !== 'soapAction')) continue;
+    if (!tipo || v === null || v === undefined || (v === '' && !VAZIO_SIGNIFICA.has(k))) continue;
     if (Array.isArray(tipo)) {
       if (!tipo.includes(String(v))) throw new Error(`Opção ${k} inválida: ${v} (use ${tipo.join(' | ')})`);
       r[k] = String(v);

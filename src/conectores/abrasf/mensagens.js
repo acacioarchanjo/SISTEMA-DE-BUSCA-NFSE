@@ -24,31 +24,38 @@ const docTag = (doc) => (String(doc).length === 11 ? tag('Cpf', doc) : tag('Cnpj
  */
 export function montarEnvio(perfil, papel, q) {
   const op = perfil.operacoes[papel];
-  const periodo = `<${q.periodo === 'competencia' ? 'PeriodoCompetencia' : 'PeriodoEmissao'}>${tag('DataInicial', q.de)}${tag('DataFinal', q.ate)}</${q.periodo === 'competencia' ? 'PeriodoCompetencia' : 'PeriodoEmissao'}>`;
+  // namespace do XML de dados: o do padrão, ou nenhum ('' — ex.: Campinas/IMA usa elementos sem namespace)
+  const ns = q.namespace ?? perfil.namespace;
+  const raiz = (conteudo) => `<${op.envio}${ns ? ` xmlns="${ns}"` : ''}>${conteudo}</${op.envio}>`;
+  const nomePeriodo = q.periodo === 'competencia' ? 'PeriodoCompetencia' : 'PeriodoEmissao';
+  const periodo = `<${nomePeriodo}>${tag('DataInicial', q.de)}${tag('DataFinal', q.ate)}</${nomePeriodo}>`;
   if (perfil.versao === '1.00') {
     // 1.00: Prestador(Cnpj, InscricaoMunicipal) obrigatório; só emissão
-    return `<${op.envio} xmlns="${perfil.namespace}"><Prestador>${tag('Cnpj', q.cnpj)}${tag('InscricaoMunicipal', q.im)}</Prestador><PeriodoEmissao>${tag('DataInicial', q.de)}${tag('DataFinal', q.ate)}</PeriodoEmissao></${op.envio}>`;
+    return raiz(`<Prestador>${tag('Cnpj', q.cnpj)}${tag('InscricaoMunicipal', q.im)}</Prestador><PeriodoEmissao>${tag('DataInicial', q.de)}${tag('DataFinal', q.ate)}</PeriodoEmissao>`);
   }
   const id = `<CpfCnpj>${docTag(q.cnpj)}</CpfCnpj>${tag('InscricaoMunicipal', q.im)}`;
-  if (papel === 'prestadas') {
-    return `<${op.envio} xmlns="${perfil.namespace}"><Prestador>${id}</Prestador>${periodo}${tag('Pagina', q.pagina ?? 1)}</${op.envio}>`;
-  }
+  if (papel === 'prestadas') return raiz(`<Prestador>${id}</Prestador>${periodo}${tag('Pagina', q.pagina ?? 1)}`);
   // tomadas: o consulente é a própria empresa, filtrando como tomadora
-  return `<${op.envio} xmlns="${perfil.namespace}"><Consulente>${id}</Consulente>${periodo}<Tomador>${id}</Tomador>${tag('Pagina', q.pagina ?? 1)}</${op.envio}>`;
+  return raiz(`<Consulente>${id}</Consulente>${periodo}<Tomador>${id}</Tomador>${tag('Pagina', q.pagina ?? 1)}`);
 }
 
-/** Envelope SOAP conforme as opções do município. Devolve { corpo, headers }. */
+/**
+ * Envelope SOAP conforme as opções do município. Devolve { corpo, headers }.
+ * Os namespaces do envelope ficam declarados no Envelope com prefixo (soapenv:, nfse:), e o elemento da
+ * operação usa o prefixo nfse:. Assim o XML de dados NÃO herda namespace nenhum (essencial quando ele é
+ * sem namespace e quando é assinado — a assinatura é calculada sobre o XML de dados isolado).
+ */
 export function montarEnvelope(perfil, papel, envio, opcoes) {
   const op = perfil.operacoes[papel].soap;
-  const elemento = opcoes.elementoOperacao.replace('{op}', op);
+  const elemento = `nfse:${opcoes.elementoOperacao.replace('{op}', op)}`;
   const embutir = (xml) => (opcoes.embutir === 'cdata' ? `<![CDATA[${xml}]]>` : escaparXml(xml));
   const cabecalho = `<cabecalho versao="${perfil.versao}" xmlns="${perfil.namespace}"><versaoDados>${perfil.versao}</versaoDados></cabecalho>`;
   const conteudo = opcoes.estilo === 'direto'
     ? envio
-    : `<nfseCabecMsg>${embutir(cabecalho)}</nfseCabecMsg><nfseDadosMsg>${embutir(envio)}</nfseDadosMsg>`;
+    : `<nfse:nfseCabecMsg>${embutir(cabecalho)}</nfse:nfseCabecMsg><nfse:nfseDadosMsg>${embutir(envio)}</nfse:nfseDadosMsg>`;
   const soap12 = opcoes.soapVersao === '1.2';
   const nsEnv = soap12 ? 'http://www.w3.org/2003/05/soap-envelope' : 'http://schemas.xmlsoap.org/soap/envelope/';
-  const corpo = `<?xml version="1.0" encoding="UTF-8"?><soap:Envelope xmlns:soap="${nsEnv}"><soap:Body><${elemento} xmlns="${opcoes.nsServico}">${conteudo}</${elemento}></soap:Body></soap:Envelope>`;
+  const corpo = `<?xml version="1.0" encoding="UTF-8"?><soapenv:Envelope xmlns:soapenv="${nsEnv}" xmlns:nfse="${opcoes.nsServico}"><soapenv:Header/><soapenv:Body><${elemento}>${conteudo}</${elemento}></soapenv:Body></soapenv:Envelope>`;
   const acao = opcoes.soapAction ? opcoes.soapAction.replace('{ns}', opcoes.nsServico).replace('{op}', op) : '';
   const headers = soap12
     ? { 'Content-Type': `application/soap+xml; charset=utf-8${acao ? `; action="${acao}"` : ''}` }

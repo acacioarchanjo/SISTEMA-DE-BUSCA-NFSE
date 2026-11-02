@@ -42,6 +42,7 @@ export class ConectorAbrasf {
     this.requisicoes = 0;
     this.falhasTransitorias = [];
     this.assinar = !!this.opcoes.assinarConsulta;
+    this.algoritmo = this.opcoes.algoritmoAssinatura || 'sha1';
     this.assinaturaDetectada = false; // vira true se a prefeitura recusar consulta sem assinatura
 
     let url;
@@ -75,15 +76,27 @@ export class ConectorAbrasf {
   }
 
   /**
-   * Chamada com detecção de assinatura: se a prefeitura recusar a consulta por falta de assinatura,
-   * assina e tenta de novo uma vez (e o conector passa a assinar as próximas).
+   * Chamada com detecção de assinatura: se a prefeitura recusar a consulta por causa da assinatura,
+   * (1) sem assinatura → assina (SHA-1) e tenta de novo; (2) assinada com SHA-1 → tenta SHA-256.
+   * O que funcionar fica valendo para as próximas consultas (e é gravado no município).
    */
   async #chamar(papel, envio) {
+    const problemaAssinatura = (e) => e instanceof ErroConector && /assinatura|assinad|signature/i.test(`${e.message} ${e.resposta ?? ''}`);
     try {
       return await this.#chamarComRetentativa(papel, envio);
     } catch (e) {
-      if (!this.assinar && e instanceof ErroConector && /assinatura|assinad|signature/i.test(`${e.message} ${e.resposta ?? ''}`)) {
+      if (!problemaAssinatura(e)) throw e;
+      if (!this.assinar) {
         this.assinar = true;
+        this.assinaturaDetectada = true;
+        try {
+          return await this.#chamarComRetentativa(papel, envio);
+        } catch (e2) {
+          if (!problemaAssinatura(e2)) throw e2;
+        }
+      }
+      if (this.algoritmo === 'sha1') {
+        this.algoritmo = 'sha256';
         this.assinaturaDetectada = true;
         return this.#chamarComRetentativa(papel, envio);
       }
@@ -94,7 +107,7 @@ export class ConectorAbrasf {
   /** Uma chamada SOAP com até 3 tentativas para falhas temporárias. */
   async #chamarComRetentativa(papel, envioOriginal) {
     const envio = this.assinar
-      ? assinarXml(envioOriginal, this.cred, { elemento: this.perfil.operacoes[papel].envio, algoritmo: this.opcoes.algoritmoAssinatura })
+      ? assinarXml(envioOriginal, this.cred, { elemento: this.perfil.operacoes[papel].envio, algoritmo: this.algoritmo })
       : envioOriginal;
     const { corpo, headers } = montarEnvelope(this.perfil, papel, envio, this.opcoes);
     let ultimo;
@@ -147,7 +160,7 @@ export class ConectorAbrasf {
     for (const j of janelas(de, ate, Number(this.opcoes.janelaDias) || 30)) {
       let pagina = 1;
       while (pagina <= this.opcoes.maxPaginas) {
-        const envio = montarEnvio(this.perfil, papel, { cnpj: this.cred.cnpj, im: this.im, de: j.de, ate: j.ate, pagina, periodo: this.opcoes.periodo });
+        const envio = montarEnvio(this.perfil, papel, { cnpj: this.cred.cnpj, im: this.im, de: j.de, ate: j.ate, pagina, periodo: this.opcoes.periodo, namespace: this.opcoes.namespaceDados });
         const r = await this.#chamar(papel, envio);
         for (const xml of r.compNfse) {
           let nota;
@@ -171,13 +184,14 @@ export class ConectorAbrasf {
   /** Consulta mínima (último dia) só para validar URL, envelope e certificado. */
   async testar() {
     const hoje = new Date().toISOString().slice(0, 10);
-    const envio = montarEnvio(this.perfil, 'prestadas', { cnpj: this.cred.cnpj, im: this.im, de: hoje, ate: hoje, pagina: 1, periodo: this.opcoes.periodo });
+    const envio = montarEnvio(this.perfil, 'prestadas', { cnpj: this.cred.cnpj, im: this.im, de: hoje, ate: hoje, pagina: 1, periodo: this.opcoes.periodo, namespace: this.opcoes.namespaceDados });
     const r = await this.#chamar('prestadas', envio);
     return {
       ok: true,
       assinaturaDetectada: this.assinaturaDetectada,
+      algoritmoAssinatura: this.assinar ? this.algoritmo : null,
       mensagem: `Conexão OK com ${this.municipio.nome}: a prefeitura respondeu no formato ${this.perfil.nome} (${r.compNfse.length} nota(s) hoje${r.mensagens.length ? `; mensagem: ${r.mensagens[0].mensagem}` : ''}).` +
-        (this.assinaturaDetectada ? ' O município exige consulta assinada: a assinatura foi ativada automaticamente.' : this.assinar ? ' Consulta enviada assinada.' : ''),
+        (this.assinaturaDetectada ? ` O município exige consulta assinada: a assinatura (${this.algoritmo.toUpperCase()}) foi ativada automaticamente.` : this.assinar ? ` Consulta enviada assinada (${this.algoritmo.toUpperCase()}).` : ''),
     };
   }
 }

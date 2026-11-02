@@ -926,8 +926,10 @@ $('#form-vinculo').novo_ibge.addEventListener('input', async (ev) => {
   f.novo_uf.value = c.uf;
   f.novo_perfil.value = c.perfil;
   f.novo_url.value = c.url;
-  for (const [k, v] of Object.entries(c.opcoes)) if (f[`op_${k}`]) f[`op_${k}`].value = v;
+  for (const [k, v] of Object.entries(c.opcoes)) if (f[`op_${k}`] && f[`op_${k}`].type !== 'checkbox') f[`op_${k}`].value = v;
   f.op_semSoapAction.checked = c.opcoes.soapAction === '';
+  f.op_semNamespaceDados.checked = c.opcoes.namespaceDados === '';
+  f.op_assinarConsulta.checked = !!c.opcoes.assinarConsulta;
   avisar(`Configuração conhecida de ${c.nome} preenchida (${c.perfil}).`);
 });
 
@@ -939,8 +941,11 @@ $('#form-vinculo').addEventListener('submit', async (ev) => {
     let ibge = f.get('ibge');
     if (ibge === NOVO_MUNICIPIO) {
       const opcoes = {};
-      for (const [k, v] of f) if (k.startsWith('op_') && k !== 'op_semSoapAction' && v !== '') opcoes[k.slice(3)] = v;
+      const marcadores = new Set(['op_semSoapAction', 'op_semNamespaceDados', 'op_assinarConsulta']);
+      for (const [k, v] of f) if (k.startsWith('op_') && !marcadores.has(k) && v !== '') opcoes[k.slice(3)] = v;
       if (f.get('op_semSoapAction')) opcoes.soapAction = '';
+      if (f.get('op_semNamespaceDados')) opcoes.namespaceDados = '';
+      if (f.get('op_assinarConsulta')) opcoes.assinarConsulta = true;
       const m = await api('/api/municipios', {
         metodo: 'POST',
         corpo: { ibge: f.get('novo_ibge'), nome: f.get('novo_nome'), uf: f.get('novo_uf'), perfil: f.get('novo_perfil'), url: f.get('novo_url'), opcoes },

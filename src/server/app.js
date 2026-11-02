@@ -245,7 +245,7 @@ export function criarServidor(repo, opcoes = {}) {
       const r = municipioConhecido(ibge);
       if (!r) throw new ErroHttp(404, 'Não há configuração conhecida para este município.');
       const atual = repo.obterMunicipio(ibge);
-      const opcoes = { ...r.opcoes, ...(atual?.opcoes?.assinarConsulta ? { assinarConsulta: true } : {}) };
+      const opcoes = { ...r.opcoes, ...(atual?.opcoes?.assinarConsulta ? { assinarConsulta: true, ...(atual.opcoes.algoritmoAssinatura ? { algoritmoAssinatura: atual.opcoes.algoritmoAssinatura } : {}) } : {}) };
       const m = repo.salvarMunicipio({ ibge, nome: r.nome, uf: r.uf, perfil: r.perfil, url: r.url, opcoes, observacoes: r.observacoes });
       registrarAuditoria(repo.db, { tipo: 'municipio.salvo', payload: { ibge, nome: m.nome, perfil: m.perfil, url: m.url, opcoes, origem: 'configuracao_recomendada' } });
       json(res, 200, m);

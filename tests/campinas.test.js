@@ -44,11 +44,14 @@ test('Campinas: configuração conhecida gera o envelope que a prefeitura espera
   assert.equal(c.perfil, 'abrasf-2.03');
   assert.equal(c.url, 'https://novanfse.campinas.sp.gov.br/notafiscal-abrasfv203-ws/NotaFiscalSoap');
   const perfil = obterPerfil(c.perfil);
-  const envio = montarEnvio(perfil, 'prestadas', { cnpj: CNPJ_TESTE, de: '2026-01-01', ate: '2026-01-31', pagina: 1, periodo: 'emissao' });
-  const { corpo, headers } = montarEnvelope(perfil, 'prestadas', envio, opcoesEfetivas(perfil, c.opcoes));
+  const opcoes = opcoesEfetivas(perfil, c.opcoes);
+  const envio = montarEnvio(perfil, 'prestadas', { cnpj: CNPJ_TESTE, de: '2026-01-01', ate: '2026-01-31', pagina: 1, periodo: 'emissao', namespace: opcoes.namespaceDados });
+  const { corpo, headers } = montarEnvelope(perfil, 'prestadas', envio, opcoes);
   assert.equal(headers['Content-Type'], 'text/xml; charset=utf-8');
   assert.equal(headers.SOAPAction, '""', 'SOAP 1.1 com SOAPAction vazio');
-  assert.ok(corpo.includes('<soap:Body><ConsultarNfseServicoPrestado xmlns="http://nfse.abrasf.org.br"><ConsultarNfseServicoPrestadoEnvio xmlns="http://www.abrasf.org.br/nfse.xsd">'));
+  assert.ok(corpo.includes('<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:nfse="http://nfse.abrasf.org.br"><soapenv:Header/><soapenv:Body><nfse:ConsultarNfseServicoPrestado><ConsultarNfseServicoPrestadoEnvio><Prestador>'),
+    'operação com prefixo nfse: e Envio SEM namespace (XSD de Campinas)');
+  assert.equal(opcoesEfetivas(perfil, c.opcoes).assinarConsulta, true, 'Campinas exige consulta assinada (dsig:Signature obrigatório no XSD)');
   assert.ok(!corpo.includes('nfseCabecMsg'));
 
   assert.equal(difereDaRecomendada({ ibge: CAMPINAS, perfil: 'abrasf-2.02', url: c.url, opcoes: {} }), true);
@@ -69,7 +72,7 @@ function tlsServidor() {
 }
 const pemDe = (raw) => `-----BEGIN CERTIFICATE-----\n${raw.toString('base64').match(/.{1,64}/g).join('\n')}\n-----END CERTIFICATE-----\n`;
 
-async function campinasSimulada(notas) {
+async function campinasSimulada(notas, regras = {}) {
   const tls = tlsServidor();
   const pedidos = [];
   const srv = https.createServer({ ...tls, requestCert: true, rejectUnauthorized: false }, (req, res) => {
@@ -82,15 +85,20 @@ async function campinasSimulada(notas) {
       const envioXml = corpo.match(new RegExp(`<${envioNome}[\\s\\S]*</${envioNome}>`))?.[0];
       const assinado = /<Signature/.test(envioXml ?? '');
       const valida = assinado && verificarAssinatura(envioXml, pemDe(req.socket.getPeerCertificate().raw));
-      pedidos.push({ op, soapAction: req.headers.soapaction, assinado, valida });
-      res.writeHead(200, { 'Content-Type': 'text/xml;charset=UTF-8' });
+      const algoritmo = /rsa-sha256/.test(envioXml ?? '') ? 'sha256' : assinado ? 'sha1' : null;
+      pedidos.push({ op, soapAction: req.headers.soapaction, assinado, valida, algoritmo });
       const resp = (inner) => `<S:Envelope xmlns:S="http://schemas.xmlsoap.org/soap/envelope/"><S:Body><ns4:${op}Response xmlns:ns4="http://nfse.abrasf.org.br">${inner}</ns4:${op}Response></S:Body></S:Envelope>`;
       const raiz = `${op}Resposta`;
+      if (envioXml && new RegExp(`^<${envioNome}[^>]*xmlns=`).test(envioXml)) {
+        res.writeHead(500, { 'Content-Type': 'text/xml;charset=UTF-8' });
+        return res.end(`<S:Envelope xmlns:S="http://schemas.xmlsoap.org/soap/envelope/"><S:Body><S:Fault><faultcode>S:Client</faultcode><faultstring>Unmarshalling Error: elemento inesperado (uri:"http://www.abrasf.org.br/nfse.xsd", local:"${envioNome}"). Os elementos esperados são &lt;{}${envioNome}&gt;</faultstring></S:Fault></S:Body></S:Envelope>`);
+      }
+      res.writeHead(200, { 'Content-Type': 'text/xml;charset=UTF-8' });
       if (!envioXml || req.headers.soapaction !== '""') {
         return res.end(resp(`<${raiz} xmlns="http://www.abrasf.org.br/nfse.xsd"><ListaMensagemRetorno><MensagemRetorno><Codigo>E1</Codigo><Mensagem>Estrutura inválida</Mensagem></MensagemRetorno></ListaMensagemRetorno></${raiz}>`));
       }
-      if (!valida) {
-        return res.end(resp(`<${raiz} xmlns="http://www.abrasf.org.br/nfse.xsd"><ListaMensagemRetorno><MensagemRetorno><Codigo>E513</Codigo><Mensagem>Assinatura digital do XML não encontrada ou inválida.</Mensagem></MensagemRetorno></ListaMensagemRetorno></${raiz}>`));
+      if (!valida || (regras.algoritmo && algoritmo !== regras.algoritmo)) {
+        return res.end(resp(`<${raiz} xmlns="http://www.abrasf.org.br/nfse.xsd"><ListaMensagemRetorno><MensagemRetorno><Codigo>E513</Codigo><Mensagem>Arquivo enviado com erro na assinatura. Acerte a assinatura do arquivo.</Mensagem></MensagemRetorno></ListaMensagemRetorno></${raiz}>`));
       }
       const lista = notas[op.includes('Tomado') ? 'tomadas' : 'prestadas'] ?? [];
       res.end(resp(lista.length
@@ -99,7 +107,7 @@ async function campinasSimulada(notas) {
     });
   });
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));
-  return { srv, url: `https://localhost:${srv.address().port}/notafiscal-abrasfv203-ws/NotaFiscalSoap`, ca: tls.cert, pedidos };
+  return { srv, url: `https://localhost:${srv.address().port}/notafiscal-abrasfv203-ws/NotaFiscalSoap`, ca: tls.cert, pedidos, regras };
 }
 
 test('Campinas: configuração errada é sinalizada; a recomendada funciona e a assinatura é detectada e lembrada', async () => {
@@ -118,13 +126,17 @@ test('Campinas: configuração errada é sinalizada; a recomendada funciona e a 
     const vid = repo.salvarVinculo({ empresaId: id, ibge: CAMPINAS });
     await assert.rejects(testarVinculo(repo, vid, { criarConector: criar }), (e) => e.codigo === 'DADO_INCONSISTENTE' && /Estrutura inválida/.test(e.message));
 
-    // 2) configuração recomendada (envelope de Campinas), URL do servidor simulado
+    // 1b) envelope de Campinas mas Envio com o namespace ABRASF → Unmarshalling Error (erro real visto em produção)
     const rec = municipioConhecido(CAMPINAS);
-    repo.salvarMunicipio({ ibge: CAMPINAS, nome: rec.nome, uf: rec.uf, perfil: rec.perfil, url: pref.url, opcoes: rec.opcoes });
+    repo.salvarMunicipio({ ibge: CAMPINAS, nome: rec.nome, uf: rec.uf, perfil: rec.perfil, url: pref.url, opcoes: { ...rec.opcoes, namespaceDados: undefined } });
+    await assert.rejects(testarVinculo(repo, vid, { criarConector: criar }), (e) => /Unmarshalling Error/.test(e.message));
+
+    // 2) configuração recomendada sem a assinatura (cadastro antigo), URL do servidor simulado → assinatura detectada
+    repo.salvarMunicipio({ ibge: CAMPINAS, nome: rec.nome, uf: rec.uf, perfil: rec.perfil, url: pref.url, opcoes: { ...rec.opcoes, assinarConsulta: false } });
     const t = await testarVinculo(repo, vid, { criarConector: criar });
     assert.equal(t.ok, true);
     assert.equal(t.assinaturaDetectada, true);
-    assert.match(t.mensagem, /assinatura foi ativada automaticamente/);
+    assert.match(t.mensagem, /assinatura \(SHA1\) foi ativada automaticamente/);
     assert.deepEqual(pref.pedidos.slice(-2).map((p) => [p.assinado, p.valida]), [[false, false], [true, true]], '1ª sem assinatura (recusada), 2ª assinada e válida');
     assert.equal(repo.obterMunicipio(CAMPINAS).opcoes.assinarConsulta, true, 'lembrado no cadastro');
     assert.equal(listarAuditoria(repo.db, { tipo: 'municipio.assinatura_detectada' }).length, 1);
@@ -137,6 +149,14 @@ test('Campinas: configuração errada é sinalizada; a recomendada funciona e a 
     assert.ok(pref.pedidos.slice(antes).every((p) => p.assinado && p.valida && p.soapAction === '""'));
     const div = repo.listarDivergencias({ empresaId: id }).itens.map((d) => d.codigo);
     assert.deepEqual(div, ['RET-001'], 'tomada 17.05 sem retenção');
+
+    // 4) se a prefeitura recusar SHA-1, tenta SHA-256 e lembra
+    pref.regras.algoritmo = 'sha256';
+    const t2 = await testarVinculo(repo, vid, { criarConector: criar });
+    assert.equal(t2.ok, true);
+    assert.equal(t2.algoritmoAssinatura, 'sha256');
+    assert.deepEqual(pref.pedidos.slice(-2).map((p) => p.algoritmo), ['sha1', 'sha256']);
+    assert.equal(repo.obterMunicipio(CAMPINAS).opcoes.algoritmoAssinatura, 'sha256', 'algoritmo lembrado');
   } finally {
     pref.srv.close();
     limpar(dataDir);
@@ -178,7 +198,7 @@ test('API: municípios conhecidos, aviso de configuração diferente e aplicaç�
 test('mensagens de retorno: "assinatura não encontrada" é erro; "nenhuma NFS-e encontrada" é vazio', async () => {
   const { classificarMensagens } = await import('../src/conectores/abrasf/mensagens.js');
   const c = (msg) => { const r = classificarMensagens([{ codigo: 'E', mensagem: msg }]); return r.vazio ? 'vazio' : `${r.codigo}/${r.subcodigo}`; };
-  assert.equal(c('Assinatura digital do XML não encontrada ou inválida.'), 'DADO_INCONSISTENTE/ASSINATURA_EXIGIDA');
+  assert.equal(c('Arquivo enviado com erro na assinatura. Acerte a assinatura do arquivo.'), 'DADO_INCONSISTENTE/ASSINATURA_EXIGIDA');
   assert.equal(c('Certificado digital não encontrado no cadastro do contribuinte'), 'ERRO_AUTENTICACAO/ACESSO_NEGADO');
   assert.equal(c('Prestador não encontrado'), 'DADO_INCONSISTENTE/MENSAGEM_RETORNO', 'prestador não encontrado não é "sem notas"');
   assert.equal(c('Nenhuma NFS-e encontrada para os filtros informados'), 'vazio');

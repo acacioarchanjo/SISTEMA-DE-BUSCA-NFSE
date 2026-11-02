@@ -262,7 +262,7 @@ programa
     if (!rec) throw new Error('Não há configuração conhecida para este município.');
     const r = repo();
     const atual = r.obterMunicipio(ibge);
-    const opcoes = { ...rec.opcoes, ...(atual?.opcoes?.assinarConsulta ? { assinarConsulta: true } : {}) };
+    const opcoes = { ...rec.opcoes, ...(atual?.opcoes?.assinarConsulta ? { assinarConsulta: true, ...(atual.opcoes.algoritmoAssinatura ? { algoritmoAssinatura: atual.opcoes.algoritmoAssinatura } : {}) } : {}) };
     r.salvarMunicipio({ ibge, nome: rec.nome, uf: rec.uf, perfil: rec.perfil, url: rec.url, opcoes, observacoes: rec.observacoes });
     registrarAuditoria(r.db, { tipo: 'municipio.salvo', payload: { ibge, nome: rec.nome, perfil: rec.perfil, url: rec.url, opcoes, origem: 'configuracao_recomendada' } });
     console.log(`✔ ${rec.nome}: configuração recomendada aplicada (${rec.perfil}, ${rec.url}).`);

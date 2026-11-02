@@ -101,7 +101,7 @@ test('mensagens: corpo da consulta por versão e papel; envelope SOAP 1.1/1.2 e 
   const o12 = opcoesEfetivas(P202, { soapVersao: '1.2', estilo: 'direto', elementoOperacao: '{op}', soapAction: '' });
   const e12 = montarEnvelope(P202, 'prestadas', prest, o12);
   assert.equal(e12.headers['Content-Type'], 'application/soap+xml; charset=utf-8');
-  assert.ok(e12.corpo.includes('<ConsultarNfseServicoPrestado xmlns="http://nfse.abrasf.org.br"><ConsultarNfseServicoPrestadoEnvio'));
+  assert.ok(e12.corpo.includes('<nfse:ConsultarNfseServicoPrestado><ConsultarNfseServicoPrestadoEnvio xmlns="http://www.abrasf.org.br/nfse.xsd">'));
   assert.ok(e12.corpo.includes('http://www.w3.org/2003/05/soap-envelope'));
 });
 

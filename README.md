@@ -163,10 +163,11 @@ Como funciona:
   *Dado inconsistente* (SOAP Fault, MensagemRetorno) e o novo **Mudança no serviço** (resposta em formato inesperado —
   versão ou URL errada). O trecho da resposta aparece no detalhe da execução.
 - **Consulta assinada** (XMLDSig, RSA-SHA1/C14N com o A1): se a prefeitura recusar a consulta por falta de assinatura,
-  o sistema assina, tenta de novo e passa a assinar sempre naquele município.
+  o sistema assina, tenta de novo e passa a assinar sempre naquele município. Se recusar o SHA-1, tenta RSA-SHA256
+  e guarda o algoritmo que funcionou.
 - **Municípios com configuração pronta**: ao digitar o IBGE, versão, URL e envelope SOAP são preenchidos; se o cadastro
   existente for diferente, aparece **Aplicar configuração recomendada**. Disponível: **Campinas/SP** (3509502, ABRASF 2.03,
-  sistema IMA). Liste com `npm run cli -- municipio-recomendado`.
+  sistema IMA: XML da consulta **sem namespace** e **sempre assinado**). Liste com `npm run cli -- municipio-recomendado`.
 - Ainda **não suportado**: sistemas fora do padrão ABRASF (ex.: São Paulo/Paulistana, DSF, GISS) — próximas fases.
 
 ```bash
